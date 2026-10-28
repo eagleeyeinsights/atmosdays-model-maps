@@ -19,7 +19,8 @@ click-anywhere soundings read one spot with a single small read. HRRR uses a
 0.125 degree grid (about 15 MB an hour), GFS 0.25 degree (about 6.5 MB).
 
 The scheduled job in
-`.github/workflows/model-maps.yml` runs four times a day.
+`.github/workflows/model-maps.yml` checks every hour (GitHub sometimes skips a
+scheduled run) and only draws when a model has a new run.
 
 The website's own code is private; only this map-drawing job lives here, so it
 can use GitHub's free minutes for public repositories.
