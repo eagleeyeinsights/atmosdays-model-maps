@@ -11,6 +11,17 @@ and gusts on a 0.1 degree grid over the lower 48 (`hrrr/<run>/wind/points.bin`,
 one byte of mph per field and hour, stored spot by spot), which the website
 reads for each job.
 
+GFS and ECMWF also get upper-air maps: 200 and 300 mb (jet stream wind and
+heights), 500 mb (heights and absolute vorticity; ECMWF's relative vorticity
+plus the Earth's spin), 700 mb (humidity and heights) and 850 mb (temperature
+with the 0°C line, and heights).
+
+HRRR also gets storm-ingredient maps for the website's mesoanalysis page:
+mixed-layer CAPE and CIN, 0-6 km shear (VUCSH/VVCSH), 0-1 km helicity, the
+700-500 mb lapse rate, precipitable water, and the significant tornado (STP,
+fixed layer, with the HRRR's own LCL height) and supercell composite (SCP,
+most-unstable CAPE and 0-3 km helicity) parameters computed from those fields.
+
 For HRRR (2 days) and GFS (10 days) it also saves a sounding grid
 (`<model>/<run>/snd/<hour>.bin`, one file per forecast hour): for every spot,
 the surface values and the height, temperature, dew point and wind at each
