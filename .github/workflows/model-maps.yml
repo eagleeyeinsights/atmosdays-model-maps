@@ -1,0 +1,70 @@
+name: Weather model maps
+
+# Draws the forecast model maps for https://atmosdays.eagleeyeinsightsllc.com/weather/models
+# from the newest NOAA GFS, HRRR and HREF and ECMWF open-data runs and uploads them
+# to the website. A run that is already up is skipped.
+# Needs the MODELS_UPLOAD_KEY secret (same value as the website's secret);
+# without it the job does nothing.
+#
+# Only the schedule and the owner's "Run workflow" button start this job.
+# There is no pull_request trigger, so changes suggested from forks never run
+# here and never see the secret.
+on:
+  schedule:
+    - cron: '50 4,10,16,22 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Redraw even if the newest runs are already up'
+        type: boolean
+        default: false
+      models:
+        description: 'Which models (comma list)'
+        type: string
+        default: 'gfs,ecmwf,hrrr,href'
+      test_only:
+        description: 'Test: draw a few hours and keep them as a download, upload nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-maps
+  cancel-in-progress: false
+
+jobs:
+  draw:
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Draw and upload
+        if: ${{ !inputs.test_only }}
+        env:
+          MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
+          MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
+          MODELS: ${{ inputs.models || 'gfs,ecmwf,hrrr,href' }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+        run: python render_models.py --upload --models "$MODELS" $FORCE
+      - name: Test drawing (nothing uploaded)
+        if: ${{ inputs.test_only }}
+        env:
+          MODELS: ${{ inputs.models }}
+        run: python render_models.py --out out --models "$MODELS" --hours 1,12,24,48
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.test_only }}
+        with:
+          name: model-test
+          path: out
+          retention-days: 3
