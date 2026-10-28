@@ -23,6 +23,7 @@ import io
 import json
 import os
 import sys
+import random
 import threading
 import time
 import urllib.error
@@ -353,6 +354,9 @@ def get(url, headers=None, tries=6):
             if e.code in (403, 404):
                 raise
             err = e
+            if e.code in (429, 503):  # "Slow Down": back off longer, with jitter so threads spread out
+                time.sleep(min(60, 4 * 2 ** i) + random.random() * 3)
+                continue
         except Exception as e:  # noqa: BLE001
             err = e
         time.sleep(2 ** i)
@@ -369,8 +373,23 @@ def exists(url):
         return False
 
 
-def ranges_get(url, spans):
-    return {k: get(url, {"Range": f"bytes={a}-{b}"}) for k, (a, b) in spans.items()}
+def ranges_get(url, spans, gap=1 << 20):
+    """Fetch byte ranges, joining ones less than `gap` apart into one request
+    (fewer requests keeps S3 from answering 503 Slow Down)."""
+    order = sorted(spans.items(), key=lambda kv: kv[1][0])
+    groups = []
+    for k, (a, b) in order:
+        if groups and a - groups[-1][1] <= gap:
+            groups[-1][1] = max(groups[-1][1], b)
+            groups[-1][2].append((k, a, b))
+        else:
+            groups.append([a, b, [(k, a, b)]])
+    out = {}
+    for a0, b0, parts in groups:
+        raw = get(url, {"Range": f"bytes={a0}-{b0}"})
+        for k, a, b in parts:
+            out[k] = raw[a - a0:b - a0 + 1]
+    return out
 
 
 def idx_spans(text, want):
