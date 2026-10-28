@@ -11,7 +11,9 @@ name: Weather model maps
 # here and never see the secret.
 on:
   schedule:
-    - cron: '50 4,10,16,22 * * *'
+    # Every hour: GitHub sometimes skips a scheduled run, and a run with nothing
+    # new stops after about a minute, so checking often costs little.
+    - cron: '50 * * * *'
   workflow_dispatch:
     inputs:
       force:
