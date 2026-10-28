@@ -701,6 +701,198 @@ def draw_href(f, h):
     }
 
 
+# ---- model soundings (click anywhere on the website) -----------------------------
+#
+# For every spot on a grid, the temperature, moisture and wind at each pressure
+# level, so the website can draw a sounding for any spot with one small read.
+# One file per forecast hour; each spot is SND_BYTES bytes in a row:
+#   surface: pressure, ground height, 2 m temperature, 2 m dew point gap, 10 m wind u, v
+#   then per level (1000 mb up): height, temperature, dew point gap, wind u, v
+# Each value is one byte (255 = missing); the scales are in the manifest.
+
+def std_atmos(p_mb):
+    """Standard-atmosphere height (m) and temperature (C) at a pressure, for byte offsets."""
+    p = np.asarray(p_mb, dtype=float)
+    z = 44330.8 * (1 - (p / 1013.25) ** 0.190263)
+    z = np.where(p < 226.32, 11000 + 6341.6 * np.log(226.32 / p), z)
+    t = np.where(z < 11000, 15 - 0.0065 * z, -56.5)
+    return z, t
+
+
+SND_SCALE = {
+    # value = base + byte * step (base per level for z and t)
+    "ps": [500.0, 2.5], "zs": [0.0, 20.0], "t2": [-60.0, 0.5], "dd": [0.0, 0.4], "uv": [-127.0, 1.0],
+    "z": {"below": 640.0, "step": 5.0}, "t": {"below": 60.0, "step": 0.5},
+}
+HRRR_SND_LEVELS = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 725, 700, 650, 600, 550, 500, 450,
+                   400, 350, 300, 250, 200, 150, 100]
+GFS_SND_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 200, 150, 100]
+SND = {
+    "hrrr": {"grid": {"west": -126.0, "south": 21.5, "step": 0.125, "nx": 480, "ny": 233},
+             "levels": HRRR_SND_LEVELS, "hours": list(range(0, 19)) + list(range(21, 49, 3)), "dew": "DPT"},
+    "gfs": {"grid": {"west": -135.0, "south": 15.0, "step": 0.25, "nx": 321, "ny": 181},
+            "levels": GFS_SND_LEVELS, "hours": list(range(0, 241, 6)), "dew": "RH"},
+}
+
+
+def snd_info(model):
+    spec = SND[model]
+    zb, tb = std_atmos(spec["levels"])
+    return {"version": 1, **spec["grid"], "levels": spec["levels"],
+            "zbase": [round(float(z) - SND_SCALE["z"]["below"]) for z in zb],
+            "tbase": [round(float(t) - SND_SCALE["t"]["below"], 1) for t in tb],
+            "scale": {k: v for k, v in SND_SCALE.items() if k not in ("z", "t")},
+            "zstep": SND_SCALE["z"]["step"], "tstep": SND_SCALE["t"]["step"],
+            "bytes": 6 + 5 * len(spec["levels"]), "missing": 255}
+
+
+def snd_url(model, run, h):
+    if model == "hrrr":
+        return f"{HRRR}/hrrr.{run[:8]}/conus/hrrr.t{run[8:]}z.wrfprsf{h:02d}.grib2"
+    return gfs_url(run, h)
+
+
+class Sampler:
+    """Samples model fields at the sounding grid's spots; the spot positions are worked out once per model grid."""
+
+    def __init__(self, grid):
+        self.lats = grid["south"] + np.arange(grid["ny"]) * grid["step"]
+        self.lons = grid["west"] + np.arange(grid["nx"]) * grid["step"]
+        self.cache = {}
+
+    def coords(self, g):
+        key = (type(g).__name__, g.values.shape, getattr(g, "x0", None), getattr(g, "lat0", None), getattr(g, "lon0", None))
+        if key not in self.cache:
+            la, lo = np.meshgrid(self.lats, self.lons, indexing="ij")
+            if isinstance(g, LambertGrid):
+                x, y = g.xy(la, lo)
+                rows, cols = (y - g.y0) / g.dy, (x - g.x0) / g.dx
+                ny, nx = g.values.shape
+                out = (rows < -0.5) | (cols < -0.5) | (rows > ny - 0.5) | (cols > nx - 0.5)
+                # Grid winds point along the grid; this angle turns them to true north.
+                dl = np.radians(lo) - g.lov
+                ang = g.n * ((dl + np.pi) % (2 * np.pi) - np.pi)
+            else:
+                lon = np.where(lo < 0, lo + 360, lo) if g.lon0 >= 0 else lo
+                rows, cols = (la - g.lat0) / g.dlat, (lon - g.lon0) / g.dlon
+                out, ang = np.zeros(la.shape, bool), None
+            self.cache[key] = (rows, cols, out, ang)
+        return self.cache[key]
+
+    def sample(self, g):
+        rows, cols, out, _ = self.coords(g)
+        v = map_coordinates(g.values, [rows, cols], order=1, mode="nearest")
+        v[out] = np.nan
+        return v
+
+    def wind(self, gu, gv):
+        u, v = self.sample(gu), self.sample(gv)
+        ang = self.coords(gu)[3]
+        if ang is None:
+            return u, v
+        c, s = np.cos(ang), np.sin(ang)
+        return c * u + s * v, -s * u + c * v
+
+
+def dew_from_rh(t_c, rh):
+    rh = np.clip(rh, 1, 100)
+    a = np.log(rh / 100) + 17.625 * t_c / (243.04 + t_c)
+    return 243.04 * a / (17.625 - a)
+
+
+def snd_hour(model, run, h, sampler):
+    """The packed sounding grid for one forecast hour (bytes)."""
+    spec = SND[model]
+    levels, dew = spec["levels"], spec["dew"]
+    lv = {f"{p} mb": p for p in levels}
+    want = {
+        "ps": lambda v, l, f, r: v == "PRES" and l == "surface",
+        "zs": lambda v, l, f, r: v == "HGT" and l == "surface",
+        "t2": lambda v, l, f, r: v == "TMP" and l == "2 m above ground",
+        "d2": lambda v, l, f, r: v == "DPT" and l == "2 m above ground",
+        "u10": lambda v, l, f, r: v == "UGRD" and l == "10 m above ground",
+        "v10": lambda v, l, f, r: v == "VGRD" and l == "10 m above ground",
+    }
+    for name, var in (("z", "HGT"), ("t", "TMP"), ("d", dew), ("u", "UGRD"), ("v", "VGRD")):
+        for lvl, p in lv.items():
+            want[f"{name}{p}"] = (lambda var, lvl: lambda v, l, f, r: v == var and l == lvl)(var, lvl)
+    url = snd_url(model, run, h)
+    spans = idx_spans(get(url + ".idx").decode(), want)
+    missing = [k for k in want if k not in spans]
+    if missing:
+        raise RuntimeError(f"{model} +{h}h missing {missing[:5]}")
+    info = snd_info(model)
+    ny, nx = spec["grid"]["ny"], spec["grid"]["nx"]
+    out = np.full((ny, nx, info["bytes"]), 255, dtype=np.uint8)
+
+    def put(i, vals, base, step):
+        q = np.rint((vals - base) / step)
+        ok = np.isfinite(q)
+        out[:, :, i] = np.where(ok, np.clip(np.nan_to_num(q), 0, 254), 255).astype(np.uint8)
+
+    def grid(k):
+        return decode(get(url, {"Range": f"bytes={spans[k][0]}-{spans[k][1]}"}))
+
+    sc = SND_SCALE
+    t2 = sampler.sample(grid("t2")) - 273.15
+    d2 = sampler.sample(grid("d2")) - 273.15
+    put(0, sampler.sample(grid("ps")) / 100, *sc["ps"])
+    put(1, sampler.sample(grid("zs")), *sc["zs"])
+    put(2, t2, *sc["t2"])
+    put(3, np.maximum(t2 - d2, 0), *sc["dd"])
+    u, v = sampler.wind(grid("u10"), grid("v10"))
+    put(4, u, *sc["uv"])
+    put(5, v, *sc["uv"])
+    for li, p in enumerate(levels):
+        b = 6 + 5 * li
+        t = sampler.sample(grid(f"t{p}")) - 273.15
+        dv = sampler.sample(grid(f"d{p}"))
+        d = dew_from_rh(t, dv) if dew == "RH" else dv - 273.15
+        put(b, sampler.sample(grid(f"z{p}")), info["zbase"][li], info["zstep"])
+        put(b + 1, t, info["tbase"][li], info["tstep"])
+        put(b + 2, np.maximum(t - d, 0), *sc["dd"])
+        u, v = sampler.wind(grid(f"u{p}"), grid(f"v{p}"))
+        put(b + 3, u, *sc["uv"])
+        put(b + 4, v, *sc["uv"])
+    return out.tobytes()
+
+
+def render_soundings(model, run, out_dir, upload, pick=None):
+    """Packs and uploads every hour; returns the manifest entry, or None if no hour worked."""
+    spec = SND[model]
+    hours = [h for h in spec["hours"] if h in pick] if pick else spec["hours"]
+    sampler = Sampler(spec["grid"])
+    lock = threading.Lock()
+    done = []
+
+    def one(h):
+        data = snd_hour(model, run, h, sampler)
+        key = f"{model}/{run}/snd/{h:03d}.bin"
+        if out_dir:
+            p = os.path.join(out_dir, key)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as fh:
+                fh.write(data)
+        if upload:
+            send("PUT", f"/weather/models/upload/{key}", data, "application/octet-stream")
+        with lock:
+            done.append(h)
+        return len(data)
+
+    size = 0
+    with cf.ThreadPoolExecutor(max_workers=3) as pool:
+        futs = {pool.submit(one, h): h for h in hours}
+        for fu in cf.as_completed(futs):
+            try:
+                size = fu.result()
+            except Exception as e:  # noqa: BLE001  a missing hour just isn't offered
+                print(f"  {model} sounding +{futs[fu]}h failed: {e!r}", flush=True)
+    if not done:
+        return None
+    print(f"{model}: soundings for {len(done)} hours ({size / 1e6:.1f} MB each)", flush=True)
+    return {**snd_info(model), "prefix": f"{model}/{run}/snd/", "hours": sorted(done)}
+
+
 # ---- upload -------------------------------------------------------------------
 
 def site():
@@ -798,6 +990,7 @@ def main():
     ap.add_argument("--hours", help="comma list for a quick test, e.g. 0,6,12")
     ap.add_argument("--models", default=",".join(MODELS))
     ap.add_argument("--force", action="store_true", help="draw even if this run is already up")
+    ap.add_argument("--no-soundings", action="store_true", help="skip the click-anywhere sounding grids")
     a = ap.parse_args()
     if a.upload and len(os.environ.get("MODELS_UPLOAD_KEY", "")) < 24:
         print("MODELS_UPLOAD_KEY is not set; nothing to do.")
@@ -845,6 +1038,14 @@ def main():
                     print(f"{model}: wind at height for {len(points)} hours ({len(data) / 1e6:.1f} MB)", flush=True)
                 except Exception as e:  # noqa: BLE001  the maps still go up without it
                     print(f"{model}: wind at height not saved: {e!r}", flush=True)
+            snd = None
+            if model in SND and not a.no_soundings:
+                try:
+                    t0 = time.time()
+                    snd = render_soundings(model, run, a.out, a.upload, pick)
+                    print(f"{model}: soundings took {time.time() - t0:.0f}s", flush=True)
+                except Exception as e:  # noqa: BLE001  the maps still go up without them
+                    print(f"{model}: soundings not saved: {e!r}", flush=True)
         except Exception as e:  # noqa: BLE001  one model failing shouldn't stop the others
             print(f"{model}: FAILED: {e!r}", flush=True)
             failed.append(model)
@@ -855,6 +1056,8 @@ def main():
                                      "bbox": list(ar), "ext": "webp", "keep": keep}
         if point_info:
             manifest["models"][model]["points"] = point_info
+        if snd:
+            manifest["models"][model]["snd"] = snd
         manifest["models"] = dict(sorted(manifest["models"].items(), key=lambda kv: order.get(kv[0], 9)))
         # Publish after each model so a slow or failed model doesn't hold the others back.
         if a.upload:

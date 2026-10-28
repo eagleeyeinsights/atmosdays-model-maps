@@ -9,7 +9,16 @@ it needs, draws WebP maps and uploads them to the website. For HRRR it also
 saves wind at 10 m (33 ft), wind at 80 m (about 260 ft, crane and lift height)
 and gusts on a 0.1 degree grid over the lower 48 (`hrrr/<run>/wind/points.bin`,
 one byte of mph per field and hour, stored spot by spot), which the website
-reads for each job. The scheduled job in
+reads for each job.
+
+For HRRR (2 days) and GFS (10 days) it also saves a sounding grid
+(`<model>/<run>/snd/<hour>.bin`, one file per forecast hour): for every spot,
+the surface values and the height, temperature, dew point and wind at each
+pressure level, one byte each, stored spot by spot. The website's
+click-anywhere soundings read one spot with a single small read. HRRR uses a
+0.125 degree grid (about 15 MB an hour), GFS 0.25 degree (about 6.5 MB).
+
+The scheduled job in
 `.github/workflows/model-maps.yml` runs four times a day.
 
 The website's own code is private; only this map-drawing job lives here, so it
