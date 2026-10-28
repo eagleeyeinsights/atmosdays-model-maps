@@ -112,6 +112,39 @@ LEGENDS = {
         [3.0, "#4c1d95"]], "note": "1 inch (quarter size) and up is severe"},
     "ltng": {"label": "Lightning", "unit": "flashes/km² per 5 min", "stops": [
         [0.05, "#fef9c3"], [0.25, "#fde047"], [0.5, "#f59e0b"], [1, "#ef4444"], [2, "#b91c1c"], [4, "#7e22ce"]]},
+    "jet200": {"label": "200 mb wind (about 39,000 ft): the jet stream", "unit": "mph", "stops": [
+        [50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
+        "note": "Lines: 200 mb height, dam"},
+    "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "mph", "stops": [
+        [50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
+        "note": "Lines: 300 mb height, dam"},
+    "vort": {"label": "500 mb spin (absolute vorticity, about 18,000 ft)", "unit": "x10⁻⁵/s", "stops": [
+        [12, "#fff7bc"], [16, "#fee391"], [20, "#fec44f"], [24, "#fe9929"], [28, "#ec7014"], [32, "#cc4c02"], [40, "#8c2d04"]],
+        "note": "Lines: 500 mb height, dam. Spin moving in often sets off storms"},
+    "rh700": {"label": "700 mb humidity (about 10,000 ft)", "unit": "%", "stops": [
+        [50, "#e5f5e0"], [70, "#a1d99b"], [80, "#74c476"], [90, "#31a354"], [100, "#006d2c"]],
+        "note": "Lines: 700 mb height, dam. Green = moist mid levels, clouds and rain likely"},
+    "t850": {"label": "850 mb temperature (about 5,000 ft)", "unit": "°C", "stops": [
+        [-30, "#e9dcf5"], [-20, "#8c6bb1"], [-10, "#2c5bc9"], [-5, "#3d8fe0"], [0, "#9bd6f2"], [1, "#b4e3a8"], [8, "#5cb85c"],
+        [14, "#f5e050"], [20, "#f6a838"], [26, "#d42a2a"], [32, "#7a0c3a"]],
+        "note": "Blue line: 0°C, the usual rain/snow dividing line. Black lines: 850 mb height, dam"},
+    "mlcape": {"label": "Storm fuel, mixed layer (MLCAPE)", "unit": "J/kg", "stops": [
+        [100, "#e0f2fe"], [500, "#a7f3d0"], [1000, "#fde047"], [2000, "#fb923c"], [3000, "#ef4444"], [4000, "#be185d"]]},
+    "cin": {"label": "The lid on storms (CIN, mixed layer)", "unit": "J/kg", "stops": [
+        [25, "#e0e7ff"], [50, "#a5b4fc"], [100, "#6366f1"], [200, "#3730a3"], [300, "#1e1b4b"]], "note": "Darker = stronger lid"},
+    "shear6": {"label": "Wind change, ground to 20,000 ft (0-6 km shear)", "unit": "kt", "stops": [
+        [20, "#e0f2fe"], [30, "#7dd3fc"], [40, "#22c55e"], [50, "#facc15"], [60, "#f97316"], [80, "#dc2626"]], "note": "40 kt and up: supercells possible"},
+    "srh1": {"label": "Low-level spin (0-1 km helicity)", "unit": "m²/s²", "stops": [
+        [50, "#e0f2fe"], [100, "#93c5fd"], [150, "#facc15"], [250, "#f97316"], [400, "#dc2626"], [600, "#86198f"]], "note": "150 and up with storm fuel: tornado red flag"},
+    "lapse": {"label": "How fast air cools with height (700-500 mb lapse rate)", "unit": "°C/km", "stops": [
+        [6, "#e0f2fe"], [6.5, "#bae6fd"], [7, "#fde68a"], [7.5, "#fb923c"], [8, "#ef4444"], [9, "#86198f"]], "note": "7.5 and up: steep, bigger hail"},
+    "pwat": {"label": "Water in the air (precipitable water)", "unit": "in", "stops": [
+        [0.25, "#8b6b4a"], [0.5, "#d6c79a"], [0.75, "#d9f99d"], [1.0, "#86efac"], [1.25, "#22c55e"], [1.5, "#16a3a3"], [1.75, "#1f6fd1"],
+        [2.0, "#5b3fc4"], [2.5, "#9b2fae"]]},
+    "stp": {"label": "Tornado ingredients (significant tornado parameter)", "unit": "", "stops": [
+        [0.5, "#fde68a"], [1, "#fb923c"], [2, "#ef4444"], [4, "#b91c1c"], [6, "#86198f"], [10, "#4c1d95"]], "note": "Over 1: ingredients for strong tornadoes together"},
+    "scp": {"label": "Supercell ingredients (supercell composite)", "unit": "", "stops": [
+        [1, "#bae6fd"], [2, "#22c55e"], [4, "#facc15"], [8, "#f97316"], [12, "#dc2626"], [20, "#86198f"]], "note": "Over 1: rotating storms favored"},
     "prob": {"label": "Chance among the HREF models", "unit": "%", "stops": [
         [10, "#d9f99d"], [20, "#86efac"], [30, "#22c55e"], [40, "#facc15"], [50, "#fb923c"], [60, "#ef4444"],
         [70, "#dc2626"], [80, "#be185d"], [90, "#7e22ce"]]},
@@ -125,14 +158,23 @@ FIELD_NAMES = {
     "heavy": "Chance of 1 inch of rain in 6 hours",
     "dew": "Dew point (humidity)", "cape": "Storm fuel (CAPE)", "qpf": "Total rain since the run started",
     "snow": "Total snowfall", "hail": "Hail size", "ltng": "Lightning",
+    "h200": "200 mb: jet stream (39,000 ft)", "h300": "300 mb: jet stream (30,000 ft)", "h500": "500 mb: heights and spin (18,000 ft)",
+    "h700": "700 mb: mid-level moisture (10,000 ft)", "h850": "850 mb: temperature (5,000 ft)",
+    "mlcape": "Storm fuel, mixed layer (MLCAPE)", "cin": "Lid on storms (CIN)", "shear6": "Wind change to 20,000 ft (0-6 km shear)",
+    "srh1": "Low-level spin (0-1 km helicity)", "lapse": "Mid-level lapse rate", "pwat": "Water in the air (precipitable water)",
+    "stp": "Tornado ingredients (STP)", "scp": "Supercell ingredients (SCP)",
 }
 # Legend used by each picture.
-FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "heavy": "prob"}
+FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "heavy": "prob",
+                "h200": "jet200", "h300": "jet300", "h500": "vort", "h700": "rh700", "h850": "t850"}
 
 # Below these values the map stays see-through.
 FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70), "radar": (4, 6),
         "rain1": (0.005, 0.015), "rain6": (0.005, 0.02), "gust": (10, 20), "uh": (15, 30), "prob": (5, 12),
-        "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08)}
+        "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08),
+        "jet200": (45, 70), "jet300": (45, 70), "vort": (10, 14), "rh700": (60, 75), "t850": None,
+        "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
+        "stp": (0.2, 0.6), "scp": (0.5, 1.2)}
 
 
 def colorize(values, field):
@@ -354,6 +396,10 @@ GFS_WANT = {
     "t2": "TMP:2 m above ground:", "msl": "PRMSL:mean sea level:", "u10": "UGRD:10 m above ground:",
     "v10": "VGRD:10 m above ground:", "z500": "HGT:500 mb:", "u250": "UGRD:250 mb:", "v250": "VGRD:250 mb:",
     "d2": "DPT:2 m above ground:", "cape": "CAPE:surface:",
+    # Upper-air maps.
+    "z200": "HGT:200 mb:", "u200": "UGRD:200 mb:", "v200": "VGRD:200 mb:",
+    "z300": "HGT:300 mb:", "u300": "UGRD:300 mb:", "v300": "VGRD:300 mb:", "av500": "ABSV:500 mb:",
+    "z700": "HGT:700 mb:", "rh700": "RH:700 mb:", "z850": "HGT:850 mb:", "t850": "TMP:850 mb:",
 }
 
 
@@ -400,14 +446,38 @@ def gfs_fields(run, h):
         "tp6": g["tp6"] / 25.4 if "tp6" in g else None,  # kg/m2 = mm
         "d2": k_to_f(g["d2"]) if "d2" in g else None, "cape": g.get("cape"),
         "qpf": g["tpt"] / 25.4 if "tpt" in g else None,
+        **upper_air(g, lambda: g["av500"] * 1e5),
     }
+    return out
+
+
+def coriolis(ar):
+    return (2 * 7.2921e-5 * np.sin(np.radians(ar.lats)))[:, None] * np.ones((1, ar.width))
+
+
+def upper_air(g, vort):
+    """Upper-air fields in map units: heights in dam, wind in mph, vorticity x1e-5/s, RH %, temperature C."""
+    out = {}
+    try:
+        for lv in (200, 300):
+            out[f"z{lv}"] = g[f"z{lv}"] / 10
+            out[f"w{lv}"] = np.hypot(g[f"u{lv}"], g[f"v{lv}"]) * 2.23694
+        out["av500"] = vort()
+        out["z700"], out["rh700"] = g["z700"] / 10, g["rh700"]
+        out["z850"], out["t850"] = g["z850"] / 10, g["t850"] - 273.15
+    except KeyError as e:  # a missing field just leaves those maps out
+        print(f"  upper air: missing {e}", flush=True)
+        return {}
     return out
 
 
 # ECMWF open data: a JSON-lines .index file with byte offsets.
 EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v", None): "v10",
            ("gh", "500"): "z500", ("u", "250"): "u250", ("v", "250"): "v250", ("tp", None): "tp",
-           ("2d", None): "d2", ("mucape", None): "cape", ("sf", None): "sf"}
+           ("2d", None): "d2", ("mucape", None): "cape", ("sf", None): "sf",
+           ("gh", "200"): "z200", ("u", "200"): "u200", ("v", "200"): "v200", ("gh", "300"): "z300", ("u", "300"): "u300",
+           ("v", "300"): "v300", ("vo", "500"): "vo500", ("gh", "700"): "z700", ("r", "700"): "rh700", ("gh", "850"): "z850",
+           ("t", "850"): "t850"}
 
 
 def ec_url(run, h):
@@ -463,6 +533,8 @@ def ec_fields(run, h):
         "qpf": ec_tp(run, h) if h >= 6 else None,
         # Snowfall comes as meters of melted water; 10 inches of snow per inch of water.
         "snow": g["sf"] * 39.37 * 10 if h >= 6 and "sf" in g else None,
+        # ECMWF gives relative vorticity; add the Earth's spin to match GFS's absolute vorticity.
+        **upper_air(g, lambda: (g["vo500"] + coriolis(area("na"))) * 1e5),
     }
 
 
@@ -512,6 +584,20 @@ def hrrr_fields(run, h):
         "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
         "u80": lambda v, lv, f, r: v == "UGRD" and lv == "80 m above ground",
         "v80": lambda v, lv, f, r: v == "VGRD" and lv == "80 m above ground",
+        # Storm ingredients for the mesoanalysis page.
+        "mlcape": lambda v, lv, f, r: v == "CAPE" and lv == "90-0 mb above ground",
+        "mlcin": lambda v, lv, f, r: v == "CIN" and lv == "90-0 mb above ground",
+        "mucape": lambda v, lv, f, r: v == "CAPE" and lv == "255-0 mb above ground",
+        "srh1": lambda v, lv, f, r: v == "HLCY" and lv == "1000-0 m above ground",
+        "srh3": lambda v, lv, f, r: v == "HLCY" and lv == "3000-0 m above ground",
+        "shu": lambda v, lv, f, r: v == "VUCSH" and lv == "0-6000 m above ground",
+        "shv": lambda v, lv, f, r: v == "VVCSH" and lv == "0-6000 m above ground",
+        "lcl": lambda v, lv, f, r: v == "HGT" and lv == "level of adiabatic condensation from sfc",
+        "t500": lambda v, lv, f, r: v == "TMP" and lv == "500 mb",
+        "t700": lambda v, lv, f, r: v == "TMP" and lv == "700 mb",
+        "z500": lambda v, lv, f, r: v == "HGT" and lv == "500 mb",
+        "z700": lambda v, lv, f, r: v == "HGT" and lv == "700 mb",
+        "pwat": lambda v, lv, f, r: v == "PWAT" and lv.startswith("entire atmosphere"),
     }
     spans = idx_spans(get(hrrr_url(run, h) + ".idx").decode(), want)
     raw = ranges_get(hrrr_url(run, h), spans)
@@ -534,7 +620,39 @@ def hrrr_fields(run, h):
         "hail": g["hail"] * 39.37 if "hail" in g else None,  # m -> in
         "ltng": g.get("ltng"),
         "pts": pts,
+        "meso": meso_fields(g),
     }
+
+
+def meso_fields(g):
+    """Storm ingredients (SPC mesoanalysis style) from HRRR fields; missing ones are left out."""
+    out = {}
+    if "mlcape" in g:
+        out["mlcape"] = g["mlcape"]
+    if "mlcin" in g:
+        out["cin"] = -g["mlcin"]  # shown as a positive "lid" strength
+    if "srh1" in g:
+        out["srh1"] = g["srh1"]
+    if "shu" in g and "shv" in g:
+        out["shear6"] = np.hypot(g["shu"], g["shv"]) * 1.94384  # m/s -> kt
+    if all(k in g for k in ("t500", "t700", "z500", "z700")):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            out["lapse"] = (g["t700"] - g["t500"]) / ((g["z500"] - g["z700"]) / 1000)
+    if "pwat" in g:
+        out["pwat"] = g["pwat"] / 25.4  # kg/m2 = mm -> in
+    if all(k in g for k in ("mlcape", "mlcin", "srh1", "shu", "shv", "lcl")):
+        # Significant tornado parameter (fixed layer, Thompson et al. 2003/2012), mixed-layer version.
+        shr = np.hypot(g["shu"], g["shv"])
+        lcl_t = np.clip((2000 - g["lcl"]) / 1000, 0, 1)
+        shr_t = np.where(shr < 12.5, 0, np.clip(shr / 20, 0, 1.5))
+        cin_t = np.clip((200 + g["mlcin"]) / 150, 0, 1)
+        out["stp"] = np.clip(g["mlcape"] / 1500 * lcl_t * (g["srh1"] / 150) * shr_t * cin_t, 0, None)
+    if all(k in g for k in ("mucape", "srh3", "shu", "shv")):
+        # Supercell composite parameter (Thompson et al.), with 0-6 km shear and 0-3 km helicity.
+        shr = np.hypot(g["shu"], g["shv"])
+        shr_t = np.where(shr < 10, 0, np.clip(shr / 20, 0, 1))
+        out["scp"] = np.clip(g["mucape"] / 1000 * (g["srh3"] / 50) * shr_t, 0, None)
+    return out
 
 
 # HREF: NOAA's storm-model ensemble (several 3 km models blended), out to 48 hours,
@@ -669,7 +787,23 @@ def draw(fields, h):
     out["qpf"] = picture(ar, fill(fields.get("qpf"), "qpf"))
     if "snow" in fields:
         out["snow"] = picture(ar, fill(fields["snow"], "snow"))
+    out.update(draw_upper(ar, fields))
     return out
+
+
+def draw_upper(ar, f):
+    """The 200, 300, 500, 700 and 850 mb maps (empty if the model run lacks them)."""
+    if "z200" not in f:
+        return {}
+    black = "#111827"
+    return {
+        "h200": picture(ar, colorize(f["w200"], "jet200"), [(smooth(f["z200"], 3), np.arange(1080, 1290, 12), black, 1.0, True, False)]),
+        "h300": picture(ar, colorize(f["w300"], "jet300"), [(smooth(f["z300"], 3), np.arange(840, 1000, 12), black, 1.0, True, False)]),
+        "h500": picture(ar, colorize(smooth(f["av500"], 2), "vort"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), black, 1.0, True, False)]),
+        "h700": picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 3), np.arange(240, 336, 3), black, 0.9, True, False)]),
+        "h850": picture(ar, colorize(f["t850"], "t850"), [(smooth(f["t850"], 3), [0], "#1d4ed8", 1.6, False, True),
+                                                       (smooth(f["z850"], 3), np.arange(105, 171, 3), black, 0.9, True, False)]),
+    }
 
 
 def draw_hrrr(f, h):
@@ -686,6 +820,7 @@ def draw_hrrr(f, h):
         "snow": picture(ar, fill(f["snow"], "snow")),
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "ltng": picture(ar, fill(f["ltng"], "ltng")),
+        **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
     }
 
 
@@ -927,13 +1062,16 @@ def current_manifest():
 
 # ---- main ---------------------------------------------------------------------
 
+UPPER_MAPS = ["h200", "h300", "h500", "h700", "h850"]
+HRRR_MESO = ["mlcape", "cin", "shear6", "srh1", "lapse", "pwat", "stp", "scp"]
+
 MODELS = {
     "gfs": {"name": "GFS (NOAA)", "latest": gfs_latest, "fields": gfs_fields, "draw": draw, "area": "na",
-            "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf"]},
+            "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf"] + UPPER_MAPS},
     "ecmwf": {"name": "European (ECMWF)", "latest": ec_latest, "fields": ec_fields, "draw": draw, "area": "na",
-              "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow"]},
+              "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow"] + UPPER_MAPS},
     "hrrr": {"name": "HRRR (NOAA, 2 days)", "latest": short_latest(hrrr_url, 48), "fields": hrrr_fields, "draw": draw_hrrr,
-             "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"],
+             "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"] + HRRR_MESO,
              "points": True},
     "href": {"name": "HREF (NOAA blend, 2 days)", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
              "area": "conus", "hours": list(range(1, 49)), "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy"]},
