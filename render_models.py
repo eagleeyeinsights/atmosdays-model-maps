@@ -838,10 +838,13 @@ def main():
                     os.makedirs(os.path.dirname(p), exist_ok=True)
                     with open(p, "wb") as fh:
                         fh.write(data)
-                if a.upload:
-                    send("PUT", f"/weather/models/upload/{key}", data, "application/octet-stream")
-                point_info = {**POINTS, "key": key, "hours": ph}
-                print(f"{model}: wind at height for {len(points)} hours ({len(data) / 1e6:.1f} MB)", flush=True)
+                try:
+                    if a.upload:
+                        send("PUT", f"/weather/models/upload/{key}", data, "application/octet-stream")
+                    point_info = {**POINTS, "key": key, "hours": ph}
+                    print(f"{model}: wind at height for {len(points)} hours ({len(data) / 1e6:.1f} MB)", flush=True)
+                except Exception as e:  # noqa: BLE001  the maps still go up without it
+                    print(f"{model}: wind at height not saved: {e!r}", flush=True)
         except Exception as e:  # noqa: BLE001  one model failing shouldn't stop the others
             print(f"{model}: FAILED: {e!r}", flush=True)
             failed.append(model)
