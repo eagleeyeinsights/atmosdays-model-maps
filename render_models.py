@@ -122,6 +122,28 @@ LEGENDS = {
     "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "mph", "stops": [
         [50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
         "note": "Lines: 300 mb height, dam"},
+    "jet250": {"label": "250 mb wind (about 34,000 ft): the jet stream", "unit": "mph", "stops": [[50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
+        "note": "Barbs: wind in knots. Purple dashed lines: air spreading out aloft (divergence), which helps air rise below"},
+    "jet300d": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "mph", "stops": [[50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
+        "note": "Barbs: wind in knots. Purple dashed lines: air spreading out aloft (divergence), which helps air rise below"},
+    "mslp": {"label": "Sea-level pressure", "unit": "mb", "alpha": 110, "stops": [
+        [984, "#7c3aed"], [996, "#60a5fa"], [1008, "#f1f5f9"], [1016, "#f1f5f9"], [1026, "#fca5a5"], [1036, "#dc2626"]],
+        "note": "Lines every 2 mb. Barbs: wind at 33 ft, knots"},
+    "t3h": {"label": "Temperature change, last 3 hours", "unit": "°F", "stops": [
+        [-15, "#1e3a8a"], [-10, "#2563eb"], [-5, "#60a5fa"], [-2, "#bfdbfe"], [0, "#f8fafc"], [2, "#fecaca"], [5, "#f87171"],
+        [10, "#dc2626"], [15, "#7f1d1d"]], "note": "Blue: cooling (a cold front or storm outflow). Red: warming"},
+    "td3h": {"label": "Dew point change, last 3 hours", "unit": "°F", "stops": [
+        [-15, "#78350f"], [-10, "#b45309"], [-5, "#f59e0b"], [-2, "#fde68a"], [0, "#f8fafc"], [2, "#bbf7d0"], [5, "#4ade80"],
+        [10, "#16a34a"], [15, "#14532d"]], "note": "Green: moisture flowing in. Brown: drying (a dry line or front)"},
+    "cape3h": {"label": "Storm fuel change, last 3 hours (MLCAPE)", "unit": "J/kg", "stops": [
+        [-2000, "#1e3a8a"], [-1000, "#3b82f6"], [-250, "#bfdbfe"], [0, "#f8fafc"], [250, "#fde68a"], [1000, "#f97316"],
+        [2000, "#b91c1c"]], "note": "Red: fuel building (often daytime heating). Blue: fuel used up or cut off"},
+    "shear1": {"label": "Wind change, ground to 3,300 ft (0-1 km bulk shear)", "unit": "kt", "stops": [
+        [10, "#e0f2fe"], [15, "#7dd3fc"], [20, "#22c55e"], [25, "#facc15"], [30, "#f97316"], [40, "#dc2626"], [50, "#86198f"]],
+        "note": "Barbs: the shear, knots. 20 kt and up with storm fuel and low cloud bases favors tornadoes"},
+    "shear5": {"label": "Wind change, ground to 18,000 ft (surface to 500 mb bulk shear)", "unit": "kt", "stops": [
+        [20, "#e0f2fe"], [30, "#7dd3fc"], [40, "#22c55e"], [50, "#facc15"], [60, "#f97316"], [80, "#dc2626"]],
+        "note": "Barbs: the shear, knots. 40 kt and up: storms can organize and rotate"},
     "vort": {"label": "500 mb spin (absolute vorticity, about 18,000 ft)", "unit": "x10⁻⁵/s", "stops": [
         [12, "#fff7bc"], [16, "#fee391"], [20, "#fec44f"], [24, "#fe9929"], [28, "#ec7014"], [32, "#cc4c02"], [40, "#8c2d04"]],
         "note": "Lines: 500 mb height, dam. Spin moving in often sets off storms"},
@@ -137,7 +159,7 @@ LEGENDS = {
     "cin": {"label": "The lid on storms (CIN, mixed layer)", "unit": "J/kg", "stops": [
         [25, "#e0e7ff"], [50, "#a5b4fc"], [100, "#6366f1"], [200, "#3730a3"], [300, "#1e1b4b"]], "note": "Darker = stronger lid"},
     "shear6": {"label": "Wind change, ground to 20,000 ft (0-6 km shear)", "unit": "kt", "stops": [
-        [20, "#e0f2fe"], [30, "#7dd3fc"], [40, "#22c55e"], [50, "#facc15"], [60, "#f97316"], [80, "#dc2626"]], "note": "40 kt and up: supercells possible"},
+        [20, "#e0f2fe"], [30, "#7dd3fc"], [40, "#22c55e"], [50, "#facc15"], [60, "#f97316"], [80, "#dc2626"]], "note": "Barbs: the shear, knots. 40 kt and up: supercells possible"},
     "srh1": {"label": "Low-level spin (0-1 km helicity)", "unit": "m²/s²", "stops": [
         [50, "#e0f2fe"], [100, "#93c5fd"], [150, "#facc15"], [250, "#f97316"], [400, "#dc2626"], [600, "#86198f"]], "note": "150 and up with storm fuel: tornado red flag"},
     "lapse": {"label": "How fast air cools with height (700-500 mb lapse rate)", "unit": "°C/km", "stops": [
@@ -167,10 +189,14 @@ FIELD_NAMES = {
     "mlcape": "Storm fuel, mixed layer (MLCAPE)", "cin": "Lid on storms (CIN)", "shear6": "Wind change to 20,000 ft (0-6 km shear)",
     "srh1": "Low-level spin (0-1 km helicity)", "lapse": "Mid-level lapse rate", "pwat": "Water in the air (precipitable water)",
     "stp": "Tornado ingredients (STP)", "scp": "Supercell ingredients (SCP)",
+    "shear1": "Wind change to 3,300 ft (0-1 km bulk shear)", "shear": "Wind change to 18,000 ft (bulk shear)",
+    "mslp": "Sea-level pressure and wind", "t3h": "Temperature change, 3 hours", "td3h": "Dew point change, 3 hours",
+    "cape3h": "Storm fuel change, 3 hours", "jet250": "250 mb: jet stream (34,000 ft)", "jet300": "300 mb: jet stream (30,000 ft)",
 }
 # Legend used by each picture.
 FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "heavy": "prob",
-                "h200": "jet200", "h300": "jet300", "h500": "vort", "h700": "rh700", "h850": "t850"}
+                "h200": "jet200", "h300": "jet300", "h500": "vort", "h700": "rh700", "h850": "t850",
+                "jet300": "jet300d", "shear": "shear5"}
 
 # Below these values the map stays see-through.
 FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70), "radar": (4, 6),
@@ -178,7 +204,10 @@ FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70
         "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08),
         "jet200": (45, 70), "jet300": (45, 70), "vort": (10, 14), "rh700": (60, 75), "t850": None,
         "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
-        "stp": (0.2, 0.6), "scp": (0.5, 1.2)}
+        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (45, 70), "jet300d": (45, 70), "mslp": None,
+        "shear1": (8, 14), "shear5": (15, 25),
+        # Changes: see-through near zero, either way.
+        "t3h": ("abs", 1, 3), "td3h": ("abs", 1, 3), "cape3h": ("abs", 100, 300)}
 
 
 def colorize(values, field):
@@ -195,10 +224,13 @@ def colorize(values, field):
         for c in range(3):
             rgba[..., c] = np.interp(v, xs, cols[:, c]).astype(np.uint8)
     fade = FADE[field]
+    top = leg.get("alpha", 215)
     if fade is None:
-        alpha = np.full(values.shape, 215.0)
+        alpha = np.full(values.shape, float(top))
+    elif fade[0] == "abs":
+        alpha = np.clip((np.abs(v) - fade[1]) / (fade[2] - fade[1]), 0, 1) * top
     else:
-        alpha = np.clip((v - fade[0]) / (fade[1] - fade[0]), 0, 1) * 215
+        alpha = np.clip((v - fade[0]) / (fade[1] - fade[0]), 0, 1) * top
     alpha[np.isnan(values)] = 0
     rgba[..., 3] = alpha.astype(np.uint8)
     return rgba
@@ -284,6 +316,12 @@ class LambertGrid:
         t = self.n * dl
         return rho * np.sin(t), self.rho0 - rho * np.cos(t)
 
+    def rotation(self, ar):
+        """Angle (radians) that turns this grid's winds into true east/north winds at each output pixel."""
+        dl = np.radians(ar.lons)[None, :] - self.lov
+        dl = (dl + np.pi) % (2 * np.pi) - np.pi
+        return np.broadcast_to(self.n * dl, (len(ar.lats), len(ar.lons)))
+
     def sample(self, ar):
         la, lo = np.meshgrid(ar.lats, ar.lons, indexing="ij")
         x, y = self.xy(la, lo)
@@ -293,6 +331,31 @@ class LambertGrid:
         bad = map_coordinates(np.isnan(self.values).astype(np.float32), [rows, cols], order=1, mode="nearest") > 0.5
         out[bad | (rows < -0.5) | (cols < -0.5) | (rows > ny - 0.5) | (cols > nx - 0.5)] = np.nan
         return out
+
+
+def earth_wind(gu, gv, ar):
+    """u and v on the output pixels as true east/north winds (HRRR and HREF give them along their own grid)."""
+    u, v = gu.sample(ar), gv.sample(ar)
+    if not hasattr(gu, "rotation"):
+        return u, v
+    a = gu.rotation(ar)
+    c, s = np.cos(a), np.sin(a)
+    return c * u + s * v, -s * u + c * v
+
+
+R_EARTH = 6371000.0
+
+
+def kinematics(u, v, ar):
+    """Divergence and relative vorticity (1/s) of an east/north wind on a map area."""
+    lat = np.radians(ar.lats)
+    lon = np.radians(ar.lons)
+    cos, tan = np.cos(lat)[:, None], np.tan(lat)[:, None]
+    du_x, dv_x = np.gradient(u, lon, axis=1), np.gradient(v, lon, axis=1)
+    du_y, dv_y = np.gradient(u, lat, axis=0), np.gradient(v, lat, axis=0)
+    div = du_x / (R_EARTH * cos) + dv_y / R_EARTH - v * tan / R_EARTH
+    vort = dv_x / (R_EARTH * cos) - du_y / R_EARTH + u * tan / R_EARTH
+    return div, vort
 
 
 def decode(msg_bytes):
@@ -418,6 +481,7 @@ GFS_WANT = {
     "t2": "TMP:2 m above ground:", "msl": "PRMSL:mean sea level:", "u10": "UGRD:10 m above ground:",
     "v10": "VGRD:10 m above ground:", "z500": "HGT:500 mb:", "u250": "UGRD:250 mb:", "v250": "VGRD:250 mb:",
     "d2": "DPT:2 m above ground:", "cape": "CAPE:surface:",
+    "u500": "UGRD:500 mb:", "v500": "VGRD:500 mb:",
     # Upper-air maps.
     "z200": "HGT:200 mb:", "u200": "UGRD:200 mb:", "v200": "VGRD:200 mb:",
     "z300": "HGT:300 mb:", "u300": "UGRD:300 mb:", "v300": "VGRD:300 mb:", "av500": "ABSV:500 mb:",
@@ -468,8 +532,20 @@ def gfs_fields(run, h):
         "tp6": g["tp6"] / 25.4 if "tp6" in g else None,  # kg/m2 = mm
         "d2": k_to_f(g["d2"]) if "d2" in g else None, "cape": g.get("cape"),
         "qpf": g["tpt"] / 25.4 if "tpt" in g else None,
+        **surface_wind(g),
         **upper_air(g, lambda: g["av500"] * 1e5),
     }
+    return out
+
+
+KT = 1.94384  # m/s -> knots
+
+
+def surface_wind(g):
+    """10 m wind and the ground-to-500 mb bulk shear (knots), for the pressure and shear maps."""
+    out = {"u10kt": g["u10"] * KT, "v10kt": g["v10"] * KT}
+    if "u500" in g and "v500" in g:
+        out["shr_u"], out["shr_v"] = (g["u500"] - g["u10"]) * KT, (g["v500"] - g["v10"]) * KT
     return out
 
 
@@ -499,7 +575,7 @@ EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v
            ("2d", None): "d2", ("mucape", None): "cape", ("sf", None): "sf",
            ("gh", "200"): "z200", ("u", "200"): "u200", ("v", "200"): "v200", ("gh", "300"): "z300", ("u", "300"): "u300",
            ("v", "300"): "v300", ("vo", "500"): "vo500", ("gh", "700"): "z700", ("r", "700"): "rh700", ("gh", "850"): "z850",
-           ("t", "850"): "t850"}
+           ("t", "850"): "t850", ("u", "500"): "u500", ("v", "500"): "v500"}
 
 
 def ec_url(run, h):
@@ -571,6 +647,7 @@ def ec_fields(run, h):
         "qpf": ec_tp(run, h) if h >= 6 else None,
         # Snowfall comes as meters of melted water; 10 inches of snow per inch of water.
         "snow": g["sf"] * 39.37 * 10 if h >= 6 and "sf" in g else None,
+        **surface_wind(g),
         # ECMWF gives relative vorticity; add the Earth's spin to match GFS's absolute vorticity.
         **upper_air(g, lambda: (g["vo500"] + coriolis(area("na"))) * 1e5),
     }
@@ -636,6 +713,14 @@ def hrrr_fields(run, h):
         "z500": lambda v, lv, f, r: v == "HGT" and lv == "500 mb",
         "z700": lambda v, lv, f, r: v == "HGT" and lv == "700 mb",
         "pwat": lambda v, lv, f, r: v == "PWAT" and lv.startswith("entire atmosphere"),
+        "sh1u": lambda v, lv, f, r: v == "VUCSH" and lv == "0-1000 m above ground",
+        "sh1v": lambda v, lv, f, r: v == "VVCSH" and lv == "0-1000 m above ground",
+        # Upper air: the jet stream and the 500, 700 and 850 mb maps.
+        **{f"{c}{p}": (lambda c, p: lambda v, lv, f, r: v == {"u": "UGRD", "v": "VGRD"}[c] and lv == f"{p} mb")(c, p)
+           for c in "uv" for p in (250, 300, 500, 700, 850)},
+        "z850": lambda v, lv, f, r: v == "HGT" and lv == "850 mb",
+        "t850": lambda v, lv, f, r: v == "TMP" and lv == "850 mb",
+        "d700": lambda v, lv, f, r: v == "DPT" and lv == "700 mb",
     }
     spans = idx_spans(get(hrrr_url(run, h) + ".idx").decode(), want)
     raw = ranges_get(hrrr_url(run, h), spans)
@@ -648,7 +733,22 @@ def hrrr_fields(run, h):
         # Speed doesn't depend on the grid's wind direction convention, so no rotation is needed.
         pts = {"w10": np.hypot(at["u10"], at["v10"]) * 2.23694, "w80": np.hypot(at["u80"], at["v80"]) * 2.23694,
                "gust": at["gust"] * 2.23694}
-    g = {k: v.sample(ar) for k, v in grids.items() if k not in ("u10", "v10", "u80", "v80")}
+    winds = {}
+    for a, b in (("u10", "v10"), ("shu", "shv"), ("sh1u", "sh1v"), *((f"u{p}", f"v{p}") for p in (250, 300, 500, 700, 850))):
+        if a in grids and b in grids:
+            winds[a] = earth_wind(grids[a], grids[b], ar)
+    skip = {"u80", "v80", "u10", "v10", "sh1u", "sh1v", *(f"{c}{p}" for c in "uv" for p in (250, 300, 500, 700, 850))}
+    g = {k: v.sample(ar) for k, v in grids.items() if k not in skip}
+    del grids
+    before = hrrr_before(run, h)
+    change = {}
+    if before:
+        if "t2" in before:
+            change["t3h"] = k_to_f(g["t2"]) - before["t2"]
+        if "d2" in before and "d2" in g:
+            change["td3h"] = k_to_f(g["d2"]) - before["d2"]
+        if "mlcape" in before and "mlcape" in g:
+            change["cape3h"] = g["mlcape"] - before["mlcape"]
     return {
         "refc": g["refc"], "t2": k_to_f(g["t2"]), "gust": g["gust"] * 2.23694, "msl": g["msl"] / 100,
         "tp1": g["tp1"] / 25.4 if "tp1" in g else None, "uh": g.get("uh"),
@@ -659,7 +759,45 @@ def hrrr_fields(run, h):
         "ltng": g.get("ltng"),
         "pts": pts,
         "meso": meso_fields(g),
+        "change": change,
+        "winds": {k: (u * KT, v * KT) for k, (u, v) in winds.items()},
+        "z500": g["z500"] / 10 if "z500" in g else None, "z700": g["z700"] / 10 if "z700" in g else None,
+        "z850": g["z850"] / 10 if "z850" in g else None, "t850": g["t850"] - 273.15 if "t850" in g else None,
+        "rh700": rh_from(g["t700"], g["d700"]) if "t700" in g and "d700" in g else None,
     }
+
+
+def rh_from(t_k, td_k):
+    """Relative humidity (%) from temperature and dew point (Kelvin)."""
+    t, td = t_k - 273.15, td_k - 273.15
+    return np.clip(100 * np.exp(17.625 * td / (243.04 + td) - 17.625 * t / (243.04 + t)), 0, 100)
+
+
+def hrrr_before(run, h):
+    """Temperature, dew point (F) and MLCAPE three hours before the map time. For the
+    first hours of a run this comes from an earlier hourly HRRR run's starting hour."""
+    if h >= 3:
+        r2, h2 = run, h - 3
+    else:
+        t = dt.datetime.strptime(run, "%Y%m%d%H") + dt.timedelta(hours=h - 3)
+        r2, h2 = t.strftime("%Y%m%d%H"), 0
+    want = {
+        "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+        "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground",
+        "mlcape": lambda v, lv, f, r: v == "CAPE" and lv == "90-0 mb above ground",
+    }
+    try:
+        spans = idx_spans(get(hrrr_url(r2, h2) + ".idx").decode(), want)
+        raw = ranges_get(hrrr_url(r2, h2), spans)
+    except Exception as e:  # noqa: BLE001  the change maps are just left out
+        print(f"  hrrr 3-hour change for +{h}h not available: {e!r}", flush=True)
+        return None
+    ar = area("conus")
+    out = {k: decode(v).sample(ar) for k, v in raw.items()}
+    for k in ("t2", "d2"):
+        if k in out:
+            out[k] = k_to_f(out[k])
+    return out
 
 
 def meso_fields(g):
@@ -742,15 +880,16 @@ def href_fields(run, h):
 
 # ---- drawing ------------------------------------------------------------------
 
-def picture(ar, fill_rgba, contours=None, sharp=False):
-    """RGBA image with optional contour lines [(field, levels, color, width, labels, dashed)]."""
+def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None):
+    """RGBA image with optional contour lines [(field, levels, color, width, labels, dashed)]
+    and wind barbs (u_kt, v_kt, spacing_px, color)."""
     width, height = ar.width, ar.height
-    if not contours and fill_rgba is not None and fill_rgba.shape[:2] == (height, width):
+    if not contours and barbs is None and fill_rgba is not None and fill_rgba.shape[:2] == (height, width):
         # No lines to draw: skip matplotlib (much faster, same picture).
         out = io.BytesIO()
         Image.fromarray(fill_rgba, "RGBA").save(out, format="WEBP", quality=80, method=4)
         return out.getvalue()
-    if fill_rgba is None and not contours:
+    if fill_rgba is None and not contours and barbs is None:
         out = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(out, format="WEBP", quality=80, method=4)
         return out.getvalue()
@@ -773,6 +912,16 @@ def picture(ar, fill_rgba, contours=None, sharp=False):
         cs = ax.contour(xs, ys, field, levels=levels, colors=color, linewidths=width_, linestyles="dashed" if dashed else "solid")
         if labels:
             ax.clabel(cs, fmt="%d", fontsize=8, inline=True, inline_spacing=2)
+    if barbs is not None:
+        bu, bv, step, color = barbs
+        o = step // 2
+        bu, bv = bu[o::step, o::step], bv[o::step, o::step]
+        bx, by = np.meshgrid(xs[o::step], ys[o::step])
+        ok = np.isfinite(bu) & np.isfinite(bv)
+        if ok.any():
+            # Barbs point into the wind: the staff runs toward where the wind comes from.
+            ax.barbs(bx[ok], by[ok], bu[ok], bv[ok], length=6.2, linewidth=0.75, color=color,
+                     sizes={"emptybarb": 0.12, "spacing": 0.14, "height": 0.38, "width": 0.25})
     buf = io.BytesIO()
     fig.savefig(buf, format="png", transparent=True, dpi=100)
     buf.seek(0)
@@ -825,7 +974,55 @@ def draw(fields, h):
     out["qpf"] = picture(ar, fill(fields.get("qpf"), "qpf"))
     if "snow" in fields:
         out["snow"] = picture(ar, fill(fields["snow"], "snow"))
+    out["mslp"] = mslp_pic(ar, fields["msl"], fields.get("u10kt"), fields.get("v10kt"), 6)
+    if "shr_u" in fields:
+        out["shear"] = shear_pic(ar, fields["shr_u"], fields["shr_v"], "shear5")
     out.update(draw_upper(ar, fields))
+    return out
+
+
+BARB_GAP = 46  # pixels between wind barbs
+
+
+def mslp_pic(ar, msl, u, v, n):
+    lines = [(smooth(msl, n), np.arange(940, 1068, 2), "#334155", 0.8, True, False)]
+    return picture(ar, colorize(smooth(msl, n), "mslp"), lines, barbs=(u, v, BARB_GAP, "#1f2937") if u is not None else None)
+
+
+def shear_pic(ar, u, v, legend):
+    return picture(ar, colorize(np.hypot(u, v), legend), barbs=(u, v, BARB_GAP, "#111827"))
+
+
+def jet_pic(ar, u, v, legend, z=None, zlevels=None):
+    """Jet stream: wind speed colors (mph), barbs (knots) and upper-level divergence lines."""
+    # The 3 km HRRR is noisy aloft; smooth to about 100 km so only the jet-scale pattern shows.
+    su, sv = smooth(smooth(u, 24), 24), smooth(smooth(v, 24), 24)
+    div, _ = kinematics(su / KT, sv / KT, ar)
+    lines = [(smooth(div * 1e5, 10), [2, 3, 4, 6, 8], "#7e22ce", 1.0, True, True)]
+    if z is not None:
+        lines.append((smooth(z, 3), zlevels, "#111827", 1.0, True, False))
+    return picture(ar, colorize(np.hypot(u, v) * 1.15078, legend), lines, barbs=(u, v, BARB_GAP, "#111827"))
+
+
+def draw_hrrr_upper(ar, f):
+    """HRRR jet stream (250, 300 mb) and 500, 700, 850 mb maps, with barbs."""
+    w = f.get("winds") or {}
+    out = {}
+    black, bar = "#111827", lambda k: (w[k][0], w[k][1], BARB_GAP, black) if k in w else None
+    if "u250" in w:
+        out["jet250"] = jet_pic(ar, *w["u250"], "jet250")
+    if "u300" in w:
+        out["jet300"] = jet_pic(ar, *w["u300"], "jet300d")
+    if "u500" in w and f.get("z500") is not None:
+        u, v = w["u500"]
+        _, vort = kinematics(smooth(smooth(u, 8), 8) / KT, smooth(smooth(v, 8), 8) / KT, ar)
+        av = (vort + coriolis(ar)) * 1e5
+        out["h500"] = picture(ar, colorize(smooth(av, 3), "vort"), [(smooth(f["z500"], 4), np.arange(480, 612, 6), black, 1.0, True, False)], barbs=bar("u500"))
+    if f.get("rh700") is not None and f.get("z700") is not None:
+        out["h700"] = picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 4), np.arange(240, 336, 3), black, 0.9, True, False)], barbs=bar("u700"))
+    if f.get("t850") is not None and f.get("z850") is not None:
+        out["h850"] = picture(ar, colorize(f["t850"], "t850"), [(smooth(f["t850"], 3), [0], "#1d4ed8", 1.6, False, True),
+                                                             (smooth(f["z850"], 4), np.arange(105, 171, 3), black, 0.9, True, False)], barbs=bar("u850"))
     return out
 
 
@@ -859,7 +1056,24 @@ def draw_hrrr(f, h):
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "ltng": picture(ar, fill(f["ltng"], "ltng")),
         **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
+        **draw_hrrr_extra(ar, f),
     }
+
+
+def draw_hrrr_extra(ar, f):
+    """Bulk shear with barbs, sea-level pressure, 3-hour changes and the upper air (HRRR)."""
+    w = f.get("winds") or {}
+    out = {}
+    if "shu" in w:
+        out["shear6"] = shear_pic(ar, *w["shu"], "shear6")
+    if "sh1u" in w:
+        out["shear1"] = shear_pic(ar, *w["sh1u"], "shear1")
+    if "u10" in w:
+        out["mslp"] = mslp_pic(ar, f["msl"], *w["u10"], 16)
+    for k, v in (f.get("change") or {}).items():
+        out[k] = picture(ar, colorize(smooth(v, 4), k))
+    out.update(draw_hrrr_upper(ar, f))
+    return out
 
 
 def draw_href(f, h):
@@ -1101,13 +1315,14 @@ def current_manifest():
 # ---- main ---------------------------------------------------------------------
 
 UPPER_MAPS = ["h200", "h300", "h500", "h700", "h850"]
-HRRR_MESO = ["mlcape", "cin", "shear6", "srh1", "lapse", "pwat", "stp", "scp"]
+HRRR_MESO = ["mlcape", "cin", "shear6", "shear1", "srh1", "lapse", "pwat", "stp", "scp", "mslp", "t3h", "td3h", "cape3h",
+             "jet250", "jet300", "h500", "h700", "h850"]
 
 MODELS = {
     "gfs": {"name": "GFS (NOAA)", "latest": gfs_latest, "fields": gfs_fields, "draw": draw, "area": "na",
-            "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf"] + UPPER_MAPS},
+            "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "mslp", "shear"] + UPPER_MAPS},
     "ecmwf": {"name": "European (ECMWF)", "latest": ec_latest, "fields": ec_fields, "draw": draw, "area": "na",
-              "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow"] + UPPER_MAPS},
+              "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow", "mslp", "shear"] + UPPER_MAPS},
     "hrrr": {"name": "HRRR (NOAA, 2 days)", "latest": short_latest(hrrr_url, 48), "fields": hrrr_fields, "draw": draw_hrrr,
              "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"] + HRRR_MESO,
              "points": True},
