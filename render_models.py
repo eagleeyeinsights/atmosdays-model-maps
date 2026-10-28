@@ -37,7 +37,10 @@ from PIL import Image  # noqa: E402
 from scipy.ndimage import map_coordinates  # noqa: E402
 
 GFS = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
-ECMWF = "https://ecmwf-forecasts.s3.amazonaws.com"
+# ECMWF open data has identical copies on Google Cloud and AWS. The AWS copy
+# often answers 503 "Slow Down" to everyone, so Google goes first and AWS is
+# the backup.
+ECMWF_MIRRORS = ["https://storage.googleapis.com/ecmwf-open-data", "https://ecmwf-forecasts.s3.amazonaws.com"]
 HRRR = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
 HREF = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/href/prod"
 UA = "AtmosDays-Weather-Models/0.1 (contact@eagleeyeinsightsllc.com)"
@@ -373,7 +376,7 @@ def exists(url):
         return False
 
 
-def ranges_get(url, spans, gap=1 << 20):
+def ranges_get(url, spans, gap=1 << 20, fetch=None):
     """Fetch byte ranges, joining ones less than `gap` apart into one request
     (fewer requests keeps S3 from answering 503 Slow Down)."""
     order = sorted(spans.items(), key=lambda kv: kv[1][0])
@@ -386,7 +389,7 @@ def ranges_get(url, spans, gap=1 << 20):
             groups.append([a, b, [(k, a, b)]])
     out = {}
     for a0, b0, parts in groups:
-        raw = get(url, {"Range": f"bytes={a0}-{b0}"})
+        raw = (fetch or get)(url, {"Range": f"bytes={a0}-{b0}"})
         for k, a, b in parts:
             out[k] = raw[a - a0:b - a0 + 1]
     return out
@@ -500,7 +503,23 @@ EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v
 
 
 def ec_url(run, h):
-    return f"{ECMWF}/{run[:8]}/{run[8:]}z/ifs/0p25/oper/{run}0000-{h}h-oper-fc"
+    """Path of one forecast hour, without the mirror in front."""
+    return f"/{run[:8]}/{run[8:]}z/ifs/0p25/oper/{run}0000-{h}h-oper-fc"
+
+
+def ec_get(path, headers=None):
+    """Download from the first ECMWF mirror that answers."""
+    err = None
+    for base in ECMWF_MIRRORS:
+        try:
+            return get(base + path, headers, tries=3)
+        except Exception as e:  # noqa: BLE001  try the next copy
+            err = e
+    raise err
+
+
+def ec_exists(path):
+    return any(exists(base + path) for base in ECMWF_MIRRORS)
 
 
 def ec_latest(now):
@@ -508,7 +527,7 @@ def ec_latest(now):
     t -= dt.timedelta(hours=t.hour % 12)
     for _ in range(4):
         run = t.strftime("%Y%m%d%H")
-        if exists(ec_url(run, HOURS[-1]) + ".index"):
+        if ec_exists(ec_url(run, HOURS[-1]) + ".index"):
             return run
         t -= dt.timedelta(hours=12)
     return None
@@ -523,21 +542,21 @@ def ec_tp(run, h):
         return None
     key = (run, h)
     if key not in _ec_tp:
-        idx = [json.loads(x) for x in get(ec_url(run, h) + ".index").decode().splitlines() if x.strip()]
+        idx = [json.loads(x) for x in ec_get(ec_url(run, h) + ".index").decode().splitlines() if x.strip()]
         r = next(x for x in idx if x["param"] == "tp")
-        raw = get(ec_url(run, h) + ".grib2", {"Range": f"bytes={r['_offset']}-{r['_offset'] + r['_length'] - 1}"})
+        raw = ec_get(ec_url(run, h) + ".grib2", {"Range": f"bytes={r['_offset']}-{r['_offset'] + r['_length'] - 1}"})
         _ec_tp[key] = decode(raw).sample(area("na")) * 1000 / 25.4  # m -> in
     return _ec_tp[key]
 
 
 def ec_fields(run, h):
-    idx = [json.loads(x) for x in get(ec_url(run, h) + ".index").decode().splitlines() if x.strip()]
+    idx = [json.loads(x) for x in ec_get(ec_url(run, h) + ".index").decode().splitlines() if x.strip()]
     spans = {}
     for r in idx:
         name = EC_WANT.get((r["param"], r.get("levelist")))
         if name and name != "tp" and name not in spans:
             spans[name] = (r["_offset"], r["_offset"] + r["_length"] - 1)
-    raw = ranges_get(ec_url(run, h) + ".grib2", spans)
+    raw = ranges_get(ec_url(run, h) + ".grib2", spans, fetch=ec_get)
     ar = area("na")
     g = {k: decode(v).sample(ar) for k, v in raw.items()}
     tp6 = None
