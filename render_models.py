@@ -51,6 +51,12 @@ HOURS = list(range(0, 241, 6))
 FIELDS = ["temp", "precip", "wind", "upper"]
 KEEP_RUNS = 2  # newest run plus the one before
 
+# HRRR wind at every spot in the lower 48, for the website's "wind at crane
+# height" on each job: a 0.1 degree grid, one byte (mph) per field and hour,
+# stored cell by cell so the website reads one spot with a single small read.
+POINTS = {"west": -126.0, "south": 21.5, "step": 0.1, "nx": 600, "ny": 290,
+          "fields": ["w10", "w80", "gust"], "missing": 255}
+
 
 # ---- colors -------------------------------------------------------------------
 
@@ -170,6 +176,15 @@ class Area:
         ys = y0 + (np.arange(self.height) + 0.5) / self.height * (y1 - y0)
         self.lats = np.degrees(np.arctan(np.sinh(np.pi * (1 - 2 * ys))))
         self.lons = w + (np.arange(width) + 0.5) / width * (e - w)
+
+
+class PointArea:
+    """A regular latitude/longitude grid (south to north), for sampling model fields at spots."""
+
+    def __init__(self, spec):
+        st = spec["step"]
+        self.lats = spec["south"] + np.arange(spec["ny"]) * st
+        self.lons = spec["west"] + np.arange(spec["nx"]) * st
 
 
 _areas = {}
@@ -492,11 +507,24 @@ def hrrr_fields(run, h):
         # Hail at the ground (the "entire atmosphere" one counts hail aloft that melts on the way down).
         "hail": lambda v, lv, f, r: h >= 1 and v == "HAIL" and lv == "surface" and f == f"{win} max fcst",
         "ltng": lambda v, lv, f, r: v == "LTNG" and lv == "entire atmosphere",
+        # Wind at 10 m (33 ft) and 80 m (about 260 ft, crane and lift height) for the job pages.
+        "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground",
+        "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
+        "u80": lambda v, lv, f, r: v == "UGRD" and lv == "80 m above ground",
+        "v80": lambda v, lv, f, r: v == "VGRD" and lv == "80 m above ground",
     }
     spans = idx_spans(get(hrrr_url(run, h) + ".idx").decode(), want)
     raw = ranges_get(hrrr_url(run, h), spans)
     ar = area("conus")
-    g = {k: decode(v).sample(ar) for k, v in raw.items()}
+    grids = {k: decode(v) for k, v in raw.items()}
+    pts = None
+    if all(k in grids for k in ("u10", "v10", "u80", "v80", "gust")):
+        pa = PointArea(POINTS)
+        at = {k: grids[k].sample(pa) for k in ("u10", "v10", "u80", "v80", "gust")}
+        # Speed doesn't depend on the grid's wind direction convention, so no rotation is needed.
+        pts = {"w10": np.hypot(at["u10"], at["v10"]) * 2.23694, "w80": np.hypot(at["u80"], at["v80"]) * 2.23694,
+               "gust": at["gust"] * 2.23694}
+    g = {k: v.sample(ar) for k, v in grids.items() if k not in ("u10", "v10", "u80", "v80")}
     return {
         "refc": g["refc"], "t2": k_to_f(g["t2"]), "gust": g["gust"] * 2.23694, "msl": g["msl"] / 100,
         "tp1": g["tp1"] / 25.4 if "tp1" in g else None, "uh": g.get("uh"),
@@ -505,6 +533,7 @@ def hrrr_fields(run, h):
         "snow": g["snow"] * 39.37 if "snow" in g else None,  # m -> in
         "hail": g["hail"] * 39.37 if "hail" in g else None,  # m -> in
         "ltng": g.get("ltng"),
+        "pts": pts,
     }
 
 
@@ -712,17 +741,36 @@ MODELS = {
     "ecmwf": {"name": "European (ECMWF)", "latest": ec_latest, "fields": ec_fields, "draw": draw, "area": "na",
               "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow"]},
     "hrrr": {"name": "HRRR (NOAA, 2 days)", "latest": short_latest(hrrr_url, 48), "fields": hrrr_fields, "draw": draw_hrrr,
-             "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"]},
+             "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"],
+             "points": True},
     "href": {"name": "HREF (NOAA blend, 2 days)", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
              "area": "conus", "hours": list(range(1, 49)), "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy"]},
 }
 
 
-def render_model(model, run, hours, out_dir, upload):
+def points_bytes(by_hour, hours):
+    """Pack {hour: {field: array(ny, nx)}} as uint8 mph, laid out [cell][field][hour]."""
+    ny, nx, nf, nh = POINTS["ny"], POINTS["nx"], len(POINTS["fields"]), len(hours)
+    out = np.full((ny, nx, nf, nh), POINTS["missing"], dtype=np.uint8)
+    for hi, h in enumerate(hours):
+        p = by_hour.get(h)
+        if not p:
+            continue
+        for fi, name in enumerate(POINTS["fields"]):
+            v = p[name]
+            q = np.clip(np.rint(np.nan_to_num(v, nan=-1)), -1, 254)
+            out[:, :, fi, hi] = np.where(q < 0, POINTS["missing"], q).astype(np.uint8)
+    return out.tobytes()
+
+
+def render_model(model, run, hours, out_dir, upload, points=None):
     spec = MODELS[model]
 
     def one(h):
-        pics = spec["draw"](spec["fields"](run, h), h)
+        f = spec["fields"](run, h)
+        if points is not None and f.get("pts") is not None:
+            points[h] = f["pts"]
+        pics = spec["draw"](f, h)
         for field, data in pics.items():
             key = f"{model}/{run}/{field}/{h:03d}.webp"
             if out_dir:
@@ -777,8 +825,26 @@ def main():
             print(f"{model}: drawing run {run}", flush=True)
             t0 = time.time()
             hours = [h for h in spec["hours"] if h in pick] if pick else spec["hours"]
-            done = render_model(model, run, hours, a.out, a.upload)
+            points = {} if spec.get("points") else None
+            done = render_model(model, run, hours, a.out, a.upload, points)
             print(f"{model}: {len(done)} hours in {time.time() - t0:.0f}s", flush=True)
+            point_info = None
+            if points:
+                ph = spec["hours"]
+                data = points_bytes(points, ph)
+                key = f"{model}/{run}/wind/points.bin"
+                if a.out:
+                    p = os.path.join(a.out, key)
+                    os.makedirs(os.path.dirname(p), exist_ok=True)
+                    with open(p, "wb") as fh:
+                        fh.write(data)
+                try:
+                    if a.upload:
+                        send("PUT", f"/weather/models/upload/{key}", data, "application/octet-stream")
+                    point_info = {**POINTS, "key": key, "hours": ph}
+                    print(f"{model}: wind at height for {len(points)} hours ({len(data) / 1e6:.1f} MB)", flush=True)
+                except Exception as e:  # noqa: BLE001  the maps still go up without it
+                    print(f"{model}: wind at height not saved: {e!r}", flush=True)
         except Exception as e:  # noqa: BLE001  one model failing shouldn't stop the others
             print(f"{model}: FAILED: {e!r}", flush=True)
             failed.append(model)
@@ -787,6 +853,8 @@ def main():
         ar = AREAS[spec["area"]][0]
         manifest["models"][model] = {"name": spec["name"], "run": run, "hours": sorted(done), "fields": spec["maps"],
                                      "bbox": list(ar), "ext": "webp", "keep": keep}
+        if point_info:
+            manifest["models"][model]["points"] = point_info
         manifest["models"] = dict(sorted(manifest["models"].items(), key=lambda kv: order.get(kv[0], 9)))
         # Publish after each model so a slow or failed model doesn't hold the others back.
         if a.upload:
