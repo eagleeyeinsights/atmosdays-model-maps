@@ -1891,9 +1891,9 @@ def publish(model, manifest):
     own copy of the list."""
     part = {k: v for k, v in manifest.items() if k != "models"}
     part.update({"model": model, "entry": manifest["models"][model], "retired": sorted(RETIRED), "order": list(MODELS)})
-    # A website without manifest-part answers 404. Then the map list is left alone
-    # (the pictures are uploaded and show once the website is updated): sending the
-    # whole list from parallel jobs could put back older runs and delete newer ones.
+    # A website without manifest-part answers 404 and this job stops with an error,
+    # leaving the map list alone: sending the whole list from parallel jobs could put
+    # back older runs and delete newer ones.
     print(send("POST", "/weather/models/upload/manifest-part", json.dumps(part).encode(), "application/json"))
 
 
