@@ -4,9 +4,10 @@ Draws the forecast model maps shown at
 https://atmosdays.eagleeyeinsightsllc.com/weather/models: NOAA GFS, AI GFS
 (AIGFS), GEFS (31-run ensemble chances), NBM (National Blend of Models), HRRR,
 RRFS and REFS, and the ECMWF (European) and ECMWF AI (AIFS) open-data models.
-All the data is free and public. NOAA is retiring the HREF (and NAM and
-HiResW); REFS and RRFS replace them, and HREF is no longer drawn on the
-schedule (`--models href` still works by hand while NOAA has it).
+All the data is free and public. NOAA is retiring the HREF, NAM and HiResW
+(REFS and RRFS replace them). They are still drawn (HREF, NAM 3 km, HRW ARW,
+ARW2 and FV3) until NOAA stops them; after 3 days with no new run the job takes
+each off the page by itself (`SUNSET` in `render_models.py`).
 
 The models run as separate groups side by side (see the workflow), and each
 upload merges only its own model into the website's map list.

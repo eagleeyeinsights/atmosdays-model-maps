@@ -41,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         # One job per group. A typed-in list on "Run workflow" runs as one group.
-        models: ${{ fromJSON(inputs.models && format('["{0}"]', inputs.models) || '["gfs,ecmwf", "hrrr", "rrfs", "refs", "aigfs,aifs", "gefs", "nbm"]') }}
+        models: ${{ fromJSON(inputs.models && format('["{0}"]', inputs.models) || '["gfs,ecmwf", "hrrr", "rrfs", "refs", "aigfs,aifs", "gefs", "nbm", "href,nam", "hrwarw,hrwarw2,hrwfv3"]') }}
     # A group waits for its own previous run; different groups don't wait for each other.
     concurrency:
       group: model-maps-${{ matrix.models }}

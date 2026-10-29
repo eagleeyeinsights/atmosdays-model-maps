@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import random
+import tempfile
 import threading
 import time
 import urllib.error
@@ -501,14 +502,48 @@ def idx_spans(text, want):
     """Byte ranges from a NOAA .idx listing. want: {name: test(var, level, fcst, rest)}."""
     rows = [line.split(":") for line in text.splitlines() if line.strip()]
     offs = [int(r[1]) for r in rows]
-    spans = {}
+    spans = Spans()
     for i, r in enumerate(rows):
-        end = offs[i + 1] - 1 if i + 1 < len(rows) else ""
+        # Some files (NAM) pack u and v wind in one message, listed as 624.1 and 624.2
+        # with the same offset: the message ends where the next offset starts.
+        nxt = next((o for o in offs[i + 1:] if o > offs[i]), None)
+        end = nxt - 1 if nxt is not None else ""
         var, level, fcst, rest = r[3], r[4], r[5] if len(r) > 5 else "", ":".join(r[6:])
         for name, test in want.items():
             if name not in spans and test(var, level, fcst, rest):
                 spans[name] = (offs[i], end)
+                if "." in r[0]:
+                    spans.parts[name] = int(r[0].split(".")[1])
     return spans
+
+
+class Spans(dict):
+    """Byte ranges by name; .parts gives the field number inside a packed message."""
+
+    def __init__(self):
+        super().__init__()
+        self.parts = {}
+
+
+def unpack_parts(raw, spans):
+    """Turn packed messages (several fields in one) into the one wanted field each."""
+    for name, part in spans.parts.items():
+        if part > 1 and name in raw:
+            eccodes.codes_grib_multi_support_on()
+            try:
+                with tempfile.TemporaryFile() as f:  # eccodes reads packed fields from a real file
+                    f.write(raw[name])
+                    f.seek(0)
+                    gid = None
+                    for _ in range(part):
+                        if gid is not None:
+                            eccodes.codes_release(gid)
+                        gid = eccodes.codes_grib_new_from_file(f)
+                    raw[name] = eccodes.codes_get_message(gid)
+                    eccodes.codes_release(gid)
+            finally:
+                eccodes.codes_grib_multi_support_off()
+    return raw
 
 
 def k_to_f(k):
@@ -1322,6 +1357,86 @@ def draw_ai(f, h):
     return out
 
 
+# NAM 3 km and the HiResW (HRW) models: NOAA is retiring them (with HREF) once
+# RRFS and REFS take over. They stay on the page until NOAA stops making them;
+# after SUNSET_DAYS with no new run, the job takes them off the page.
+NAM = "https://noaa-nam-pds.s3.amazonaws.com"
+HIRESW = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/hiresw/prod"
+SUNSET = {"href", "nam", "hrwarw", "hrwarw2", "hrwfv3"}
+SUNSET_DAYS = 3
+
+
+def nam_url(run, h):
+    return f"{NAM}/nam.{run[:8]}/nam.t{run[8:]}z.conusnest.hiresf{h:02d}.tm00.grib2"
+
+
+def hiresw_url(kind):
+    """kind: arw, arw2 (ARW member 2) or fv3; 2.5 km lower-48 files on NOMADS."""
+    core, tail = {"arw": ("arw", "conus"), "arw2": ("arw", "conusmem2"), "fv3": ("fv3", "conus")}[kind]
+
+    def url(run, h):
+        return f"{HIRESW}/hiresw.{run[:8]}/hiresw.t{run[8:]}z.{core}_2p5km.f{h:02d}.{tail}.grib2"
+    return url
+
+
+def storm_model_fields(url):
+    """Common maps from a single 3 km-class storm model (NAM 3 km, HiResW). Fields a
+    model doesn't have come out blank."""
+    def fields(run, h):
+        win = hour_window(h, 1)
+        total = (f"0-{h} hour acc fcst", f"0-{h // 24} day acc fcst")
+        want = {
+            "refc": lambda v, lv, f, r: v == "REFC" and lv.startswith("entire atmosphere"),
+            "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+            "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground",
+            "gust": lambda v, lv, f, r: v == "GUST" and lv == "surface",
+            "msl": lambda v, lv, f, r: v in ("MSLET", "PRMSL") and lv == "mean sea level",
+            "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground",
+            "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
+            "cape": lambda v, lv, f, r: v == "CAPE" and lv == "surface",
+            "uh": lambda v, lv, f, r: h >= 1 and v == "MXUPHL" and lv == "5000-2000 m above ground" and f == f"{win} max fcst",
+            "tpt": lambda v, lv, f, r: h >= 1 and v == "APCP" and f in total,
+        }
+        u = url(run, h)
+        spans = idx_spans(get(u + ".idx").decode(), want)
+        grids = {k: decode(v) for k, v in unpack_parts(ranges_get(u, spans), spans).items()}
+        ar = area("conus")
+        winds = {}
+        if "u10" in grids and "v10" in grids:
+            uu, vv = earth_wind(grids.pop("u10"), grids.pop("v10"), ar)
+            winds["u10"] = (uu * KT, vv * KT)
+        g = {k: v.sample(ar) for k, v in grids.items()}
+        return {
+            "refc": g.get("refc"), "t2": k_to_f(g["t2"]), "d2": k_to_f(g["d2"]) if "d2" in g else None,
+            "gust": g["gust"] * 2.23694 if "gust" in g else None, "msl": g["msl"] / 100 if "msl" in g else None,
+            "cape": g.get("cape"), "uh": g.get("uh"), "qpf": g["tpt"] / 25.4 if "tpt" in g else None, "winds": winds,
+        }
+    return fields
+
+
+def draw_storm_model(f, h):
+    ar = area("conus")
+    out = {
+        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "temp": temp_pic(ar, f["t2"]),
+        "dew": picture(ar, fill(f["d2"], "dew")),
+        "gust": picture(ar, fill(f["gust"], "gust")),
+        "cape": picture(ar, fill(f["cape"], "cape")),
+        "uh": picture(ar, fill(f["uh"], "uh"), sharp=True),
+        "qpf": picture(ar, fill(f["qpf"], "qpf")),
+    }
+    if f["msl"] is not None and "u10" in f["winds"]:
+        out["mslp"] = mslp_pic(ar, f["msl"], *f["winds"]["u10"], 16)
+    else:
+        out["mslp"] = picture(ar, None)
+    if f["qpf"] is None:
+        del out["qpf"]
+    return out
+
+
+STORM_MAPS = ["radar", "temp", "dew", "gust", "cape", "uh", "qpf", "mslp"]
+
+
 # ---- drawing ------------------------------------------------------------------
 
 def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None):
@@ -1756,6 +1871,13 @@ def current_manifest():
         return {"models": {}}
 
 
+def retire(model, manifest):
+    """Take a model NOAA no longer makes off the website's map list (and delete its pictures)."""
+    part = {k: v for k, v in manifest.items() if k != "models"}
+    part.update({"retired": [model], "order": list(MODELS)})
+    print(send("POST", "/weather/models/upload/manifest-part", json.dumps(part).encode(), "application/json"))
+
+
 def publish(model, manifest):
     """Add one model's run to the website's map list. Other model groups run as
     separate jobs at the same time, so the website merges this one model into its
@@ -1802,14 +1924,19 @@ MODELS = {
     "refs": {"name": "REFS chances", "latest": short_latest(refs_url, 60, every=12), "fields": refs_fields,
              "draw": draw_refs, "area": "conus", "hours": list(range(1, 61)),
              "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy", "freeze", "pfrzra", "wind34", "fog"]},
-    # HREF stops when NOAA retires it (REFS replaces it); it can still be drawn by hand
-    # with --models href until then, but it is no longer on the schedule or the page.
-    "href": {"name": "HREF (NOAA blend, 2 days)", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
+    # Being retired by NOAA (see SUNSET): shown until NOAA stops making them.
+    "href": {"name": "HREF", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
              "area": "conus", "hours": list(range(1, 49)), "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy"]},
+    "nam": {"name": "NAM 3 km", "latest": short_latest(nam_url, 60, every=12), "fields": storm_model_fields(nam_url),
+            "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 61)),
+            "maps": [m for m in STORM_MAPS if m != "qpf"]},  # NAM rain comes in 3-hour pieces, not run totals
+    **{f"hrw{k}": {"name": name, "latest": short_latest(hiresw_url(k), 48, every=12), "fields": storm_model_fields(hiresw_url(k)),
+                   "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 49)), "maps": STORM_MAPS}
+       for k, name in (("arw", "HRW ARW"), ("arw2", "HRW ARW2"), ("fv3", "HRW FV3"))},
 }
-DEFAULT_MODELS = [m for m in MODELS if m != "href"]
-# Taken off the page: dropped from the map list the next time any model uploads.
-RETIRED = {"href"}
+DEFAULT_MODELS = list(MODELS)
+# Taken off the page by hand: dropped from the map list the next time any model uploads.
+RETIRED = set()
 
 
 def points_bytes(by_hour, hours):
@@ -1874,7 +2001,7 @@ def main():
     current = current_manifest() if a.upload else {"models": {}}
     manifest = {"updated": now.isoformat(timespec="seconds"), "bbox": list(BBOX), "legends": LEGENDS,
                 "names": FIELD_NAMES, "fieldLegend": FIELD_LEGEND,
-                "credit": "NOAA NCEP GFS, AIGFS, GEFS, NBM, HRRR, RRFS and REFS; ECMWF open data (IFS and AIFS), CC BY 4.0",
+                "credit": "NOAA NCEP GFS, AIGFS, GEFS, NBM, HRRR, RRFS, REFS, HREF, NAM and HiResW; ECMWF open data (IFS and AIFS), CC BY 4.0",
                 "models": dict(current.get("models") or {})}
     order = {k: i for i, k in enumerate(MODELS)}
     failed = []
@@ -1884,6 +2011,14 @@ def main():
             run = spec["latest"](now)
             if not run:
                 print(f"{model}: no complete run found")
+                last = (manifest["models"].get(model) or {}).get("run")
+                if model in SUNSET and last and now - dt.datetime.strptime(last, "%Y%m%d%H").replace(
+                        tzinfo=dt.timezone.utc) > dt.timedelta(days=SUNSET_DAYS):
+                    # NOAA has stopped this model: take it off the page.
+                    print(f"{model}: no new run since {last}; taking it off the page")
+                    manifest["models"].pop(model, None)
+                    if a.upload:
+                        retire(model, manifest)
                 continue
             old = manifest["models"].get(model) or {}
             if old.get("run") == run and not a.force:
