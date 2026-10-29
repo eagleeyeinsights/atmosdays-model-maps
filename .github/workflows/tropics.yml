@@ -1,0 +1,49 @@
+name: Hurricane models and recon
+
+# Spaghetti model tracks, storm history and Hurricane Hunter (recon) data for
+# https://atmosdays.eagleeyeinsightsllc.com/weather/hurricanes, from free NOAA
+# National Hurricane Center files. Uploads one small JSON file to the website.
+# Needs the MODELS_UPLOAD_KEY secret (same as the model maps job); without it
+# the job only prints a summary.
+#
+# Only the schedule and the owner's "Run workflow" button start this job.
+on:
+  schedule:
+    # Every 15 minutes: Hurricane Hunters send new data every 10 minutes.
+    # A run takes well under a minute, and this repo is public, so it is free.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Test: print a summary, upload nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tropics
+  cancel-in-progress: true
+
+jobs:
+  tropics:
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build and upload
+        if: ${{ !inputs.test_only }}
+        env:
+          MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
+          MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
+        run: python tropics.py --upload
+      - name: Test (nothing uploaded)
+        if: ${{ inputs.test_only }}
+        run: python tropics.py --test --out out/tropics.json
