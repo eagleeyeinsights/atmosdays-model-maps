@@ -41,3 +41,11 @@ ECMWF maps are drawn from ECMWF open data, licensed CC BY 4.0
 
 Run by hand: Actions → Weather model maps → Run workflow (tick "test_only" to
 draw a few hours without uploading).
+
+## Hurricane extras (`tropics.py`)
+
+Every 15 minutes (`.github/workflows/tropics.yml`) this writes one small JSON file for
+the hurricane page: spaghetti model tracks (NHC ATCF a-deck, newest run of each model),
+the storm's 6-hourly best track (b-deck) and Hurricane Hunter observations and center
+fixes (NHC recon archive). Standard library only. `python tropics.py --test` prints a
+summary; `--recon-sample N` reads the newest N recon files however old (for testing).
