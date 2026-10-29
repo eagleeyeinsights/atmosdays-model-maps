@@ -1,8 +1,10 @@
 name: Weather model maps
 
 # Draws the forecast model maps for https://atmosdays.eagleeyeinsightsllc.com/weather/models
-# from the newest NOAA GFS, HRRR and HREF and ECMWF open-data runs and uploads them
-# to the website. A run that is already up is skipped.
+# from the newest NOAA (GFS, AI GFS, GEFS, NBM, HRRR, RRFS, REFS) and ECMWF open-data
+# (ECMWF, AIFS) runs and uploads them to the website. A run that is already up is skipped.
+# The models are split into groups that run side by side, so a slow one (GEFS)
+# never holds up the hourly HRRR. This repo is public, so GitHub doesn't count minutes.
 # Needs the MODELS_UPLOAD_KEY secret (same value as the website's secret);
 # without it the job does nothing.
 #
@@ -21,9 +23,9 @@ on:
         type: boolean
         default: false
       models:
-        description: 'Which models (comma list)'
+        description: 'Which models (comma list; leave empty for all)'
         type: string
-        default: 'gfs,ecmwf,hrrr,href'
+        default: ''
       test_only:
         description: 'Test: draw a few hours and keep them as a download, upload nothing'
         type: boolean
@@ -32,15 +34,20 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: model-maps
-  cancel-in-progress: false
-
 jobs:
   draw:
     if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    strategy:
+      fail-fast: false
+      matrix:
+        # One job per group. A typed-in list on "Run workflow" runs as one group.
+        models: ${{ fromJSON(inputs.models && format('["{0}"]', inputs.models) || '["gfs,ecmwf", "hrrr", "rrfs", "refs", "aigfs,aifs", "gefs", "nbm"]') }}
+    # A group waits for its own previous run; different groups don't wait for each other.
+    concurrency:
+      group: model-maps-${{ matrix.models }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,17 +63,17 @@ jobs:
         env:
           MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
           MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
-          MODELS: ${{ inputs.models || 'gfs,ecmwf,hrrr,href' }}
+          MODELS: ${{ matrix.models }}
           FORCE: ${{ inputs.force && '--force' || '' }}
         run: python render_models.py --upload --models "$MODELS" $FORCE
       - name: Test drawing (nothing uploaded)
         if: ${{ inputs.test_only }}
         env:
-          MODELS: ${{ inputs.models }}
+          MODELS: ${{ matrix.models }}
         run: python render_models.py --out out --models "$MODELS" --hours 1,12,24,48
       - uses: actions/upload-artifact@v4
         if: ${{ inputs.test_only }}
         with:
-          name: model-test
+          name: model-test-${{ strategy.job-index }}
           path: out
           retention-days: 3

@@ -1,8 +1,15 @@
 # AtmosDays model maps
 
 Draws the forecast model maps shown at
-https://atmosdays.eagleeyeinsightsllc.com/weather/models: NOAA GFS, HRRR and
-HREF, and the ECMWF (European) open-data model. All the data is free and public.
+https://atmosdays.eagleeyeinsightsllc.com/weather/models: NOAA GFS, AI GFS
+(AIGFS), GEFS (31-run ensemble chances), NBM (National Blend of Models), HRRR,
+RRFS and REFS, and the ECMWF (European) and ECMWF AI (AIFS) open-data models.
+All the data is free and public. NOAA is retiring the HREF (and NAM and
+HiResW); REFS and RRFS replace them, and HREF is no longer drawn on the
+schedule (`--models href` still works by hand while NOAA has it).
+
+The models run as separate groups side by side (see the workflow), and each
+upload merges only its own model into the website's map list.
 
 `render_models.py` finds the newest complete runs, downloads only the fields
 it needs, draws WebP maps and uploads them to the website. For HRRR it also
@@ -36,8 +43,9 @@ scheduled run) and only draws when a model has a new run.
 The website's own code is private; only this map-drawing job lives here, so it
 can use GitHub's free minutes for public repositories.
 
-ECMWF maps are drawn from ECMWF open data, licensed CC BY 4.0
-(Copyright ECMWF). NOAA data is public domain.
+ECMWF and AIFS maps are drawn from ECMWF open data, licensed CC BY 4.0
+(Copyright ECMWF; based on data and products of ECMWF). NOAA data is public domain.
+NBM files store every other row right to left; `decode()` turns those rows around.
 
 Run by hand: Actions → Weather model maps → Run workflow (tick "test_only" to
 draw a few hours without uploading).
