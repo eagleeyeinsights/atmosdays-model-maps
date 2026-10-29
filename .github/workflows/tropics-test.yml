@@ -16,17 +16,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python tropics.py --test --out out/tropics.json
-      - run: python -c "import json;d=json.load(open('out/tropics.json'));r=d['recon'];print(json.dumps(r['fixes'][-1:],indent=1)[:3000]);f=r['flights'];print(json.dumps(f[-1]['obs'][-1]['pts'][:5]) if f else 'no flights')"
-      - name: Sample raw files
-        run: |
-          set -x
-          curl -sS -A 'AtmosDays test' https://www.nhc.noaa.gov/CurrentStorms.json | head -c 3000; echo
-          Y=$(date -u +%Y)
-          for d in AHONT1 REPNT2 AHOPN1 REPPN2; do
-            f=$(curl -sS -A 'AtmosDays test' https://www.nhc.noaa.gov/archive/recon/$Y/$d/ | grep -o "$d-[A-Z]*\.[0-9]*\.txt" | sort -u | tail -1)
-            echo "== $d latest: $f"; [ -n "$f" ] && curl -sS -A 'AtmosDays test' https://www.nhc.noaa.gov/archive/recon/$Y/$d/$f | head -40
-          done
-          s=$(curl -sS https://ftp.nhc.noaa.gov/atcf/aid_public/ | grep -o 'a[a-z][a-z][0-9]*\.dat\.gz' | sort -u | grep "$Y" | tail -3); echo "$s"
-          for a in $s; do curl -sS https://ftp.nhc.noaa.gov/atcf/aid_public/$a | gunzip | awk -F, '{print $5}' | sort | uniq -c | sort -rn | head -80 | tr '\n' ' '; echo; done
-          b=$(echo "$s" | tail -1 | sed 's/^a/b/; s/\.gz$//'); curl -sS https://ftp.nhc.noaa.gov/atcf/btk/$b | tail -4
+      - run: python tropics.py --test --recon-sample 4 --out out/tropics.json
+      - run: python -c "import json;d=json.load(open('out/tropics.json'));r=d['recon'];[x.pop('raw') for x in r['fixes']];print(json.dumps(r['fixes'],indent=0)[:4000]);f=r['flights'];print(json.dumps([(x['aircraft'],x['mission'],x['storm'],[(o['time'],o['pts'][:2]) for o in x['obs']]) for x in f]) if f else 'no flights')"

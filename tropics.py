@@ -44,10 +44,10 @@ GROUPS = {
     "global": ["AVNO", "EMX", "EMX2", "ECMF", "CMC", "NVGM", "UKM", "UKX", "EGRR", "JGSM", "GFSO"],
     "hurricane": ["HFSA", "HFSB", "HWRF", "HMON", "CTCX", "COTC", "HAFS"],
     "consensus": ["TVCN", "TVCA", "TVCE", "TVCX", "HCCA", "FSSE", "GFEX", "RVCN", "CONU"],
-    "simple": ["BAMD", "BAMM", "BAMS", "LBAR", "XTRP", "CLP5", "TCLP"],
+    "simple": ["BAMD", "BAMM", "BAMS", "TABD", "TABM", "TABS", "LBAR", "XTRP", "CLP5", "TCLP"],
     "means": ["AEMN", "CEMN", "EEMN", "UEMN", "NEMN"],
 }
-INTENSITY = {"SHIP", "DSHP", "LGEM", "ICON", "IVCN", "IVDR", "OCD5", "SHF5", "DSF5", "RI25", "RI30", "RI35", "RI40"}
+INTENSITY = {"NNIB", "NNIC", "DRCL", "SHIP", "DSHP", "LGEM", "ICON", "IVCN", "IVDR", "OCD5", "SHF5", "DSF5", "RI25", "RI30", "RI35", "RI40"}
 SKIP = {"CARQ", "WRNG", "BEST", "COMS"}
 NAMES = {
     "OFCL": "NHC official forecast", "AVNO": "GFS (NOAA)", "AVNI": "GFS, adjusted", "EMX": "ECMWF (European)", "EMXI": "ECMWF, adjusted",
@@ -60,11 +60,14 @@ NAMES = {
     "FSSE": "Florida State super-ensemble", "GFEX": "GFS + ECMWF average", "RVCN": "Consensus (RVCN)", "CONU": "Consensus (CONU)",
     "BAMD": "Beta-advection, deep", "BAMM": "Beta-advection, medium", "BAMS": "Beta-advection, shallow", "LBAR": "LBAR (simple)",
     "XTRP": "Straight-line motion", "CLP5": "Climatology and persistence", "TCLP": "Climatology and persistence",
-    "AEMN": "GFS ensemble average", "AEMI": "GFS ensemble average, adjusted", "CEMN": "Canadian ensemble average", "EEMN": "ECMWF ensemble average",
+    "AEMN": "GFS ensemble average", "AC00": "GFS ensemble control run", "TABD": "Trajectory beta-advection, deep",
+    "TABM": "Trajectory beta-advection, medium", "TABS": "Trajectory beta-advection, shallow", "OFCI": "NHC official, adjusted",
+    "NNIB": "Neural-net intensity (NNIB)", "NNIC": "Neural-net intensity (NNIC)", "DRCL": "Climatology intensity (DRCL)",
+    "GDMN": "GFS-based model (GDMN)", "NGX": "Navy model (NGX)", "AEMI": "GFS ensemble average, adjusted", "CEMN": "Canadian ensemble average", "EEMN": "ECMWF ensemble average",
     "UEMN": "UK ensemble average", "NEMN": "Navy ensemble average", "SHIP": "SHIPS (statistical)", "DSHP": "SHIPS with land decay",
     "LGEM": "LGEM (statistical)", "ICON": "Intensity consensus (ICON)", "IVCN": "Intensity consensus (IVCN)", "OCD5": "Climatology and persistence",
 }
-MEMBER_PREFIX = {"AP": "GFS ensemble", "AC": "GFS ensemble", "CP": "Canadian ensemble", "CC": "Canadian ensemble", "EP": "ECMWF ensemble",
+MEMBER_PREFIX = {"AP": "GFS ensemble", "AC": "GFS ensemble control", "CP": "Canadian ensemble", "CC": "Canadian ensemble", "EP": "ECMWF ensemble",
                  "EN": "ECMWF ensemble", "EE": "ECMWF ensemble", "NP": "Navy ensemble", "UE": "UK ensemble"}
 
 
@@ -73,7 +76,9 @@ def group_of(tech):
         if tech in techs:
             return g
     # "Interpolated" early versions: the late model shifted to start at the current position.
-    if tech in ("AVNI", "EMXI", "CMCI", "NVGI", "UKMI", "UKXI", "EGRI", "HFAI", "HFBI", "HWFI", "HMNI", "CTCI", "AEMI", "COTI"):
+    # Adjusted ("interpolated") copies of late models: ...I shifts the 6-hour-old run, ...2 the 12-hour-old run.
+    base = {t[:3] for g in ("global", "hurricane", "means", "official") for t in GROUPS[g]} | {"HWF", "HMN", "HFA", "HFB", "CTC", "NVG", "UKX", "CEM", "GDM", "NGX", "OFC"}
+    if len(tech) == 4 and tech[3] in "I2" and tech[:3] in base:
         return "early"
     if re.fullmatch(r"[A-Z]{2}\d\d", tech) and tech[:2] in MEMBER_PREFIX:
         return "members"
@@ -222,7 +227,7 @@ def stamp_of(name):
     return dt.datetime.strptime(m.group(1), "%Y%m%d%H%M").replace(tzinfo=dt.timezone.utc) if m else None
 
 
-def recent_files(folder, year, hours, now):
+def recent_files(folder, year, hours, now, newest=0):
     url = f"{NHC}/archive/recon/{year}/{folder}/"
     try:
         html = get(url).decode("latin-1")
@@ -230,7 +235,7 @@ def recent_files(folder, year, hours, now):
         print(f"  {folder}: no listing ({e})", file=sys.stderr)
         return []
     names = sorted(set(re.findall(rf'href="({folder}-[A-Z]{{4}}\.\d{{12}}\.txt)"', html)))
-    keep = [n for n in names if (s := stamp_of(n)) and now - s <= dt.timedelta(hours=hours)]
+    keep = names[-newest:] if newest else [n for n in names if (s := stamp_of(n)) and now - s <= dt.timedelta(hours=hours)]
     return [(n, url + n) for n in keep]
 
 
@@ -387,11 +392,11 @@ def parse_vortex(text, file_time):
     return out
 
 
-def recon(now):
+def recon(now, sample=0):
     year = now.year
     hdobs, fixes = [], []
     for folder in HDOB_DIRS:
-        for name, url in recent_files(folder, year, HDOB_HOURS, now):
+        for name, url in recent_files(folder, year, HDOB_HOURS, now, sample):
             try:
                 h = parse_hdob(get_text(url), stamp_of(name))
             except Exception as e:  # noqa: BLE001
@@ -401,7 +406,7 @@ def recon(now):
                 h["basin"] = "Atlantic" if folder.endswith("NT1") else "Pacific"
                 hdobs.append(h)
     for folder in VORTEX_DIRS:
-        for name, url in recent_files(folder, year, VORTEX_HOURS, now):
+        for name, url in recent_files(folder, year, VORTEX_HOURS, now, sample):
             try:
                 v = parse_vortex(get_text(url), stamp_of(name))
             except Exception as e:  # noqa: BLE001
@@ -445,11 +450,11 @@ def storm_extras(sid):
     return out
 
 
-def build(now=None):
+def build(now=None, sample=0):
     now = now or dt.datetime.now(dt.timezone.utc)
     ids = active_storms()
     storms = [storm_extras(s) for s in ids]
-    return {"updated": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "storms": storms, "recon": recon(now)}
+    return {"updated": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "storms": storms, "recon": recon(now, sample)}
 
 
 def summary(doc):
@@ -501,8 +506,9 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--upload", action="store_true")
     ap.add_argument("--test", action="store_true")
+    ap.add_argument("--recon-sample", type=int, default=0, help="test: read the newest N recon files of each kind, however old")
     a = ap.parse_args()
-    doc = build()
+    doc = build(sample=a.recon_sample)
     summary(doc)
     if a.out:
         os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
