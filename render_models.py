@@ -1888,16 +1888,13 @@ def retire(model, manifest):
 def publish(model, manifest):
     """Add one model's run to the website's map list. Other model groups run as
     separate jobs at the same time, so the website merges this one model into its
-    own copy of the list. A website that doesn't have that yet gets the whole list."""
+    own copy of the list."""
     part = {k: v for k, v in manifest.items() if k != "models"}
     part.update({"model": model, "entry": manifest["models"][model], "retired": sorted(RETIRED), "order": list(MODELS)})
-    try:
-        print(send("POST", "/weather/models/upload/manifest-part", json.dumps(part).encode(), "application/json"))
-        return
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
-            raise
-    print(send("POST", "/weather/models/upload/manifest", json.dumps(manifest).encode(), "application/json"))
+    # A website without manifest-part answers 404. Then the map list is left alone
+    # (the pictures are uploaded and show once the website is updated): sending the
+    # whole list from parallel jobs could put back older runs and delete newer ones.
+    print(send("POST", "/weather/models/upload/manifest-part", json.dumps(part).encode(), "application/json"))
 
 
 # ---- main ---------------------------------------------------------------------
