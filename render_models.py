@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import random
+import tempfile
 import threading
 import time
 import urllib.error
@@ -68,6 +69,11 @@ def hexc(h):
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
+
+PROB_STOPS = [[10, "#d9f99d"], [20, "#86efac"], [30, "#22c55e"], [40, "#facc15"], [50, "#fb923c"], [60, "#ef4444"],
+              [70, "#dc2626"], [80, "#be185d"], [90, "#7e22ce"]]
+WIND_STOPS = [[5, "#d8ecf3"], [10, "#9fd3e6"], [20, "#5ab4d6"], [30, "#3b8f4f"], [40, "#e8d54a"], [50, "#f08a2a"],
+              [60, "#d7301f"], [75, "#8c1d6e"]]
 
 LEGENDS = {
     "temp": {"label": "Temperature", "unit": "°F", "stops": [
@@ -171,9 +177,27 @@ LEGENDS = {
         [0.5, "#fde68a"], [1, "#fb923c"], [2, "#ef4444"], [4, "#b91c1c"], [6, "#86198f"], [10, "#4c1d95"]], "note": "Over 1: ingredients for strong tornadoes together"},
     "scp": {"label": "Supercell ingredients (supercell composite)", "unit": "", "stops": [
         [1, "#bae6fd"], [2, "#22c55e"], [4, "#facc15"], [8, "#f97316"], [12, "#dc2626"], [20, "#86198f"]], "note": "Over 1: rotating storms favored"},
-    "prob": {"label": "Chance among the HREF models", "unit": "%", "stops": [
-        [10, "#d9f99d"], [20, "#86efac"], [30, "#22c55e"], [40, "#facc15"], [50, "#fb923c"], [60, "#ef4444"],
-        [70, "#dc2626"], [80, "#be185d"], [90, "#7e22ce"]]},
+    "prob": {"label": "Chance among the model runs", "unit": "%", "stops": PROB_STOPS},
+    "chance": {"label": "Chance", "unit": "%", "stops": PROB_STOPS},
+    "spread": {"label": "How much the GEFS runs disagree at 500 mb (spread)", "unit": "m", "stops": [
+        [10, "#e0f2fe"], [20, "#93c5fd"], [30, "#facc15"], [45, "#f97316"], [60, "#dc2626"], [90, "#86198f"]],
+        "note": "Lines: average 500 mb height, dam. More spread = less certain"},
+    "smoke": {"label": "Wildfire smoke near the ground", "unit": "µg/m³", "stops": [
+        [5, "#f5f0dc"], [12, "#e6d3a3"], [35, "#d9a066"], [55, "#b5651d"], [150, "#7f1d1d"], [250, "#4a044e"]],
+        "note": "35 and up is unhealthy for sensitive groups (like PM2.5)"},
+    "ptype": {"label": "Rain, snow, sleet or freezing rain", "unit": "", "steps": True, "min": "Rain", "max": "Freezing rain",
+              "stops": [[1, "#22c55e"], [2, "#3b82f6"], [3, "#f97316"], [4, "#ec4899"]],
+              "note": "Green: rain. Blue: snow. Orange: sleet. Pink: freezing rain"},
+    "snow6": {"label": "Snowfall, 6 hours", "unit": "in", "stops": [
+        [0.1, "#dbeafe"], [0.5, "#93c5fd"], [1, "#60a5fa"], [2, "#2563eb"], [4, "#1e3a8a"], [6, "#7c3aed"], [8, "#c026d3"],
+        [12, "#f472b6"]]},
+    "ice": {"label": "Ice buildup from freezing rain, 6 hours", "unit": "in", "stops": [
+        [0.01, "#fbcfe8"], [0.05, "#f472b6"], [0.1, "#db2777"], [0.25, "#9d174d"], [0.5, "#581c87"], [1, "#1e1b4b"]],
+        "note": "0.25 inch and up brings down limbs and power lines"},
+    "sky": {"label": "Cloud cover", "unit": "%", "alpha": 170, "stops": [
+        [10, "#f1f5f9"], [25, "#cbd5e1"], [50, "#94a3b8"], [75, "#64748b"], [100, "#334155"]]},
+    "wind80": {"label": "Wind at 260 ft (80 m)", "unit": "mph", "stops": WIND_STOPS},
+    "wind100": {"label": "Wind at 330 ft (100 m, wind-farm hub height)", "unit": "mph", "stops": WIND_STOPS},
 }
 
 # Picture name -> label for the map list on the page.
@@ -181,7 +205,7 @@ FIELD_NAMES = {
     "temp": "Temperature", "precip": "Rain and snow, with pressure", "wind": "Wind", "upper": "Jet stream and 500 mb",
     "radar": "Computer radar", "rain1": "Rain, 1 hour", "rain6": "Rain, 6 hours", "gust": "Wind gusts",
     "uh": "Storm rotation tracks", "storms40": "Chance of strong storms", "rotation": "Chance of rotating storms",
-    "heavy": "Chance of 1 inch of rain in 6 hours",
+    "heavy": "Chance of 1 inch of rain in 3 hours",
     "dew": "Dew point (humidity)", "cape": "Storm fuel (CAPE)", "qpf": "Total rain since the run started",
     "snow": "Total snowfall", "hail": "Hail size", "ltng": "Lightning",
     "h200": "200 mb: jet stream (39,000 ft)", "h300": "300 mb: jet stream (30,000 ft)", "h500": "500 mb: heights and spin (18,000 ft)",
@@ -192,11 +216,21 @@ FIELD_NAMES = {
     "shear1": "Wind change to 3,300 ft (0-1 km bulk shear)", "shear": "Wind change to 18,000 ft (bulk shear)",
     "mslp": "Sea-level pressure and wind", "t3h": "Temperature change, 3 hours", "td3h": "Dew point change, 3 hours",
     "cape3h": "Storm fuel change, 3 hours", "jet250": "250 mb: jet stream (34,000 ft)", "jet300": "300 mb: jet stream (30,000 ft)",
+    # Chance maps (GEFS and REFS), the blend (NBM) and the new storm model (RRFS).
+    "rain24half": "Chance of 1/2 inch of rain in 24 hours", "rain24one": "Chance of 1 inch of rain in 24 hours",
+    "freeze": "Chance of freezing (below 32°F)", "wind25": "Chance of wind over 25 mph", "spread500": "500 mb: average and spread",
+    "pfrzra": "Chance of freezing rain", "wind34": "Chance of wind over 34 mph at 260 ft", "fog": "Chance of dense fog (under 1/4 mile)",
+    "smoke": "Wildfire smoke near the ground", "ptype": "Rain, snow, sleet or freezing rain",
+    "pop6": "Chance of rain or snow, 6 hours", "tstm": "Chance of thunder, 6 hours", "snow6": "Snowfall, 6 hours",
+    "ice6": "Ice buildup, 6 hours", "sky": "Cloud cover", "wind80": "Wind at 260 ft (80 m)",
+    "wind100": "Wind at 330 ft (100 m, wind farms)",
 }
 # Legend used by each picture.
 FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "heavy": "prob",
                 "h200": "jet200", "h300": "jet300", "h500": "vort", "h700": "rh700", "h850": "t850",
-                "jet300": "jet300d", "shear": "shear5"}
+                "jet300": "jet300d", "shear": "shear5",
+                **{k: "prob" for k in ("rain24half", "rain24one", "freeze", "wind25", "pfrzra", "wind34", "fog")},
+                "pop6": "chance", "tstm": "chance", "spread500": "spread", "ice6": "ice"}
 
 # Below these values the map stays see-through.
 FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70), "radar": (4, 6),
@@ -206,6 +240,8 @@ FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70
         "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
         "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (45, 70), "jet300d": (45, 70), "mslp": None,
         "shear1": (8, 14), "shear5": (15, 25),
+        "chance": (5, 12), "spread": (5, 12), "smoke": (3, 8), "ptype": (0.5, 0.6), "snow6": (0.05, 0.2),
+        "ice": (0.005, 0.01), "sky": (5, 30), "wind80": (5, 15), "wind100": (5, 15),
         # Changes: see-through near zero, either way.
         "t3h": ("abs", 1, 3), "td3h": ("abs", 1, 3), "cape3h": ("abs", 100, 300)}
 
@@ -364,11 +400,14 @@ def decode(msg_bytes):
         g = lambda k: eccodes.codes_get(gid, k)  # noqa: E731
         vals = eccodes.codes_get_values(gid)
         missing = g("missingValue")
-        if g("bitmapPresent"):
+        if g("bitmapPresent") or (eccodes.codes_is_defined(gid, "missingValueManagementUsed") and g("missingValueManagementUsed")):
             vals = np.where(vals == missing, np.nan, vals)
         if g("gridType") == "lambert":
             nx, ny = g("Nx"), g("Ny")
             vals = vals.reshape(ny, nx)
+            if eccodes.codes_is_defined(gid, "alternativeRowScanning") and g("alternativeRowScanning"):
+                # Every other row is stored right to left (NBM).
+                vals[1::2] = vals[1::2, ::-1]
             if not g("jScansPositively"):
                 vals = vals[::-1]
             lat0 = g("latitudeOfFirstGridPointInDegrees")
@@ -442,11 +481,12 @@ def exists(url):
 def ranges_get(url, spans, gap=1 << 20, fetch=None):
     """Fetch byte ranges, joining ones less than `gap` apart into one request
     (fewer requests keeps S3 from answering 503 Slow Down)."""
+    # The last field in a file has no end offset (""): it runs to the end of the file.
     order = sorted(spans.items(), key=lambda kv: kv[1][0])
     groups = []
     for k, (a, b) in order:
-        if groups and a - groups[-1][1] <= gap:
-            groups[-1][1] = max(groups[-1][1], b)
+        if groups and groups[-1][1] != "" and a - groups[-1][1] <= gap:
+            groups[-1][1] = "" if b == "" else max(groups[-1][1], b)
             groups[-1][2].append((k, a, b))
         else:
             groups.append([a, b, [(k, a, b)]])
@@ -454,7 +494,7 @@ def ranges_get(url, spans, gap=1 << 20, fetch=None):
     for a0, b0, parts in groups:
         raw = (fetch or get)(url, {"Range": f"bytes={a0}-{b0}"})
         for k, a, b in parts:
-            out[k] = raw[a - a0:b - a0 + 1]
+            out[k] = raw[a - a0:] if b == "" else raw[a - a0:b - a0 + 1]
     return out
 
 
@@ -462,14 +502,48 @@ def idx_spans(text, want):
     """Byte ranges from a NOAA .idx listing. want: {name: test(var, level, fcst, rest)}."""
     rows = [line.split(":") for line in text.splitlines() if line.strip()]
     offs = [int(r[1]) for r in rows]
-    spans = {}
+    spans = Spans()
     for i, r in enumerate(rows):
-        end = offs[i + 1] - 1 if i + 1 < len(rows) else ""
+        # Some files (NAM) pack u and v wind in one message, listed as 624.1 and 624.2
+        # with the same offset: the message ends where the next offset starts.
+        nxt = next((o for o in offs[i + 1:] if o > offs[i]), None)
+        end = nxt - 1 if nxt is not None else ""
         var, level, fcst, rest = r[3], r[4], r[5] if len(r) > 5 else "", ":".join(r[6:])
         for name, test in want.items():
             if name not in spans and test(var, level, fcst, rest):
                 spans[name] = (offs[i], end)
+                if "." in r[0]:
+                    spans.parts[name] = int(r[0].split(".")[1])
     return spans
+
+
+class Spans(dict):
+    """Byte ranges by name; .parts gives the field number inside a packed message."""
+
+    def __init__(self):
+        super().__init__()
+        self.parts = {}
+
+
+def unpack_parts(raw, spans):
+    """Turn packed messages (several fields in one) into the one wanted field each."""
+    for name, part in spans.parts.items():
+        if part > 1 and name in raw:
+            eccodes.codes_grib_multi_support_on()
+            try:
+                with tempfile.TemporaryFile() as f:  # eccodes reads packed fields from a real file
+                    f.write(raw[name])
+                    f.seek(0)
+                    gid = None
+                    for _ in range(part):
+                        if gid is not None:
+                            eccodes.codes_release(gid)
+                        gid = eccodes.codes_grib_new_from_file(f)
+                    raw[name] = eccodes.codes_get_message(gid)
+                    eccodes.codes_release(gid)
+            finally:
+                eccodes.codes_grib_multi_support_off()
+    return raw
 
 
 def k_to_f(k):
@@ -578,9 +652,10 @@ EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v
            ("t", "850"): "t850", ("u", "500"): "u500", ("v", "500"): "v500"}
 
 
-def ec_url(run, h):
-    """Path of one forecast hour, without the mirror in front."""
-    return f"/{run[:8]}/{run[8:]}z/ifs/0p25/oper/{run}0000-{h}h-oper-fc"
+def ec_url(run, h, src="ifs"):
+    """Path of one forecast hour, without the mirror in front. src: "ifs" (the regular
+    ECMWF model) or "aifs-single" (ECMWF's AI model, same files and names)."""
+    return f"/{run[:8]}/{run[8:]}z/{src}/0p25/oper/{run}0000-{h}h-oper-fc"
 
 
 def ec_get(path, headers=None):
@@ -598,12 +673,12 @@ def ec_exists(path):
     return any(exists(base + path) for base in ECMWF_MIRRORS)
 
 
-def ec_latest(now):
+def ec_latest(now, src="ifs", last=HOURS[-1]):
     t = now.replace(minute=0, second=0, microsecond=0)
     t -= dt.timedelta(hours=t.hour % 12)
     for _ in range(4):
         run = t.strftime("%Y%m%d%H")
-        if ec_exists(ec_url(run, HOURS[-1]) + ".index"):
+        if ec_exists(ec_url(run, last, src) + ".index"):
             return run
         t -= dt.timedelta(hours=12)
     return None
@@ -612,29 +687,42 @@ def ec_latest(now):
 _ec_tp = {}
 
 
-def ec_tp(run, h):
+def ec_tp(run, h, src="ifs"):
     """Total precipitation since the start of the run (inches)."""
     if h == 0:
         return None
-    key = (run, h)
+    key = (src, run, h)
     if key not in _ec_tp:
-        idx = [json.loads(x) for x in ec_get(ec_url(run, h) + ".index").decode().splitlines() if x.strip()]
+        idx = [json.loads(x) for x in ec_get(ec_url(run, h, src) + ".index").decode().splitlines() if x.strip()]
         r = next(x for x in idx if x["param"] == "tp")
-        raw = ec_get(ec_url(run, h) + ".grib2", {"Range": f"bytes={r['_offset']}-{r['_offset'] + r['_length'] - 1}"})
-        _ec_tp[key] = decode(raw).sample(area("na")) * 1000 / 25.4  # m -> in
+        raw = ec_get(ec_url(run, h, src) + ".grib2", {"Range": f"bytes={r['_offset']}-{r['_offset'] + r['_length'] - 1}"})
+        # The regular model gives meters of water; the AI model gives kg/m2 (= mm).
+        _ec_tp[key] = decode(raw).sample(area("na")) * (1000 if src == "ifs" else 1) / 25.4  # -> in
     return _ec_tp[key]
 
 
-def ec_fields(run, h):
-    idx = [json.loads(x) for x in ec_get(ec_url(run, h) + ".index").decode().splitlines() if x.strip()]
+def ec_grids(run, h, src, want):
+    """The wanted ECMWF fields of one hour on the North America map pixels (precipitation is read separately)."""
+    idx = [json.loads(x) for x in ec_get(ec_url(run, h, src) + ".index").decode().splitlines() if x.strip()]
     spans = {}
     for r in idx:
-        name = EC_WANT.get((r["param"], r.get("levelist")))
+        name = want.get((r["param"], r.get("levelist")))
         if name and name != "tp" and name not in spans:
             spans[name] = (r["_offset"], r["_offset"] + r["_length"] - 1)
-    raw = ranges_get(ec_url(run, h) + ".grib2", spans, fetch=ec_get)
+    raw = ranges_get(ec_url(run, h, src) + ".grib2", spans, fetch=ec_get)
     ar = area("na")
-    g = {k: decode(v).sample(ar) for k, v in raw.items()}
+    return {k: decode(v).sample(ar) for k, v in raw.items()}
+
+
+def ec_tp6(run, h, src="ifs"):
+    if h < 6:
+        return None
+    now_tp, before = ec_tp(run, h, src), ec_tp(run, h - 6, src)
+    return np.clip(now_tp - (before if before is not None else 0), 0, None)
+
+
+def ec_fields(run, h):
+    g = ec_grids(run, h, "ifs", EC_WANT)
     tp6 = None
     if h >= 6:
         now_tp, before = ec_tp(run, h), ec_tp(run, h - 6)
@@ -876,6 +964,484 @@ def href_fields(run, h):
         "msl": g["msl"] / 100 if "msl" in g else None,
         "p40": pct(g.get("p40")), "puh": pct(g.get("puh")), "prain": pct(g.get("prain")),
     }
+
+
+# ---- more models (added October 2026) ------------------------------------------
+#
+# All from free public copies on Amazon (NOAA Open Data Dissemination) or ECMWF
+# open data, so they work without NOMADS. NOAA data is public domain; ECMWF open
+# data (including the AIFS AI model) is CC BY 4.0.
+
+RRFS_OPS = "https://noaa-rrfs-ops-pds.s3.amazonaws.com"
+GEFS = "https://noaa-gefs-pds.s3.amazonaws.com"
+NBM = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
+AIGFS = "https://noaa-nws-graphcastgfs-pds.s3.amazonaws.com"
+
+
+def prob_under(rest, x):
+    return f"prob <{x}:" in rest + ":"
+
+
+# REFS: NOAA's new storm-model ensemble (RRFS members plus two HRRR runs). It
+# replaces the HREF, which NOAA is retiring along with the NAM and HiResW. Hourly
+# to 60 hours over the lower 48; only the 00 and 12 UTC runs are drawn.
+def refs_url(run, h, product="pmmn"):
+    return f"{RRFS_OPS}/refs.{run[:8]}/{run[8:]}/ensprod/refs.t{run[8:]}z.{product}.f{h:02d}.conus.grib2"
+
+
+def refs_fields(run, h):
+    w1, w3 = hour_window(h, 1), hour_window(h, 3)
+    parts = {
+        "pmmn": {
+            "refc": lambda v, lv, f, r: v == "REFC" and lv.startswith("entire atmosphere"),
+            "tp1": lambda v, lv, f, r: v == "APCP" and f == f"{w1} acc fcst",
+        },
+        "mean": {
+            "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+            "msl": lambda v, lv, f, r: v == "MSLET" and lv == "mean sea level",
+        },
+        "prob": {
+            "p40": lambda v, lv, f, r: v == "REFC" and prob_over(r, 40),
+            "puh": lambda v, lv, f, r: v == "MXUPHL" and lv == "5000-2000 m above ground" and prob_over(r, 75),
+            "prain": lambda v, lv, f, r: h >= 3 and v == "APCP" and f == f"{w3} acc fcst" and prob_over(r, 25.4),
+            "pfreeze": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground" and prob_under(r, 273.15),
+            "pfrzra": lambda v, lv, f, r: v == "CFRZR" and r.startswith("prob >=1"),
+            # 15.4 m/s = 34 mph at 80 m (about 260 ft, crane height).
+            "pwind": lambda v, lv, f, r: v == "WIND" and lv == "80 m above ground" and prob_over(r, 15.4),
+            # Under 400 m (1/4 mile): dense fog.
+            "pfog": lambda v, lv, f, r: v == "VIS" and prob_under(r, 400),
+        },
+    }
+    ar = area("conus")
+    g = {}
+    for product, want in parts.items():
+        url = refs_url(run, h, product)
+        spans = idx_spans(get(url + ".idx").decode(), want)
+        for k, v in ranges_get(url, spans).items():
+            g[k] = decode(v).sample(ar)
+
+    def pct(a):
+        if a is None:
+            return None
+        return a * 100 if np.nanmax(a) <= 1.0 else a
+    return {
+        "refc": g.get("refc"), "tp1": g["tp1"] / 25.4 if "tp1" in g else None, "t2": k_to_f(g["t2"]),
+        "msl": g["msl"] / 100 if "msl" in g else None,
+        **{k: pct(g.get(k)) for k in ("p40", "puh", "prain", "pfreeze", "pfrzra", "pwind", "pfog")},
+    }
+
+
+def draw_refs(f, h):
+    out = draw_href(f, h)
+    ar = area("conus")
+    for key, name in (("pfreeze", "freeze"), ("pfrzra", "pfrzra"), ("pwind", "wind34"), ("pfog", "fog")):
+        out[name] = picture(ar, fill(f.get(key), "prob"))
+    return out
+
+
+# RRFS: NOAA's new 3 km model for North America. It replaces the NAM (and NAM
+# 3 km) and HiResW. The 00/06/12/18 UTC runs go out 84 hours; we draw every hour
+# to 48 hours, then every 3 hours, from the 00 and 12 UTC runs.
+def rrfs_url(run, h):
+    return f"{RRFS_OPS}/rrfs.{run[:8]}/{run[8:]}/rrfs.t{run[8:]}z.2dfld.3km.f{h:03d}.conus.grib2"
+
+
+RRFS_HOURS = list(range(0, 49)) + list(range(51, 85, 3))
+
+
+def rrfs_fields(run, h):
+    win = hour_window(h, 1)
+    total = (f"0-{h} hour acc fcst", f"0-{h // 24} day acc fcst")
+    want = {
+        "refc": lambda v, lv, f, r: v == "REFC" and lv.startswith("entire atmosphere"),
+        "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+        "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground",
+        "gust": lambda v, lv, f, r: v == "GUST" and lv == "surface",
+        "msl": lambda v, lv, f, r: v == "MSLET" and lv == "mean sea level",
+        "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground",
+        "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
+        "cape": lambda v, lv, f, r: v == "CAPE" and lv == "surface",
+        "tp1": lambda v, lv, f, r: h >= 1 and v == "APCP" and f == f"{win} acc fcst",
+        "tpt": lambda v, lv, f, r: h >= 1 and v == "APCP" and f in total,
+        "snow": lambda v, lv, f, r: h >= 1 and v == "ASNOW" and f in total,
+        "uh": lambda v, lv, f, r: h >= 1 and v == "MXUPHL" and lv == "5000-2000 m above ground" and f == f"{win} max fcst",
+        "hail": lambda v, lv, f, r: h >= 1 and v == "HAIL" and lv == "surface" and f == f"{win} max fcst",
+        # Smoke: organic particles (from fires) 8 m above the ground.
+        "smoke": lambda v, lv, f, r: v == "MASSDEN" and lv == "8 m above ground" and "Particulate organic matter" in r
+                                       and "ave" not in f,
+        **{k: (lambda name: lambda v, lv, f, r: v == name and lv == "surface" and f.endswith(" fcst") and "-" not in f)(k.upper())
+           for k in ("crain", "csnow", "cicep", "cfrzr")},
+    }
+    spans = idx_spans(get(rrfs_url(run, h) + ".idx").decode(), want)
+    raw = ranges_get(rrfs_url(run, h), spans)
+    ar = area("conus")
+    grids = {k: decode(v) for k, v in raw.items()}
+    winds = {}
+    if "u10" in grids and "v10" in grids:
+        u, v = earth_wind(grids.pop("u10"), grids.pop("v10"), ar)
+        winds["u10"] = (u * KT, v * KT)
+    g = {k: v.sample(ar) for k, v in grids.items()}
+    del grids
+    ptype = None
+    if all(k in g for k in ("crain", "csnow", "cicep", "cfrzr")):
+        # Worst type wins: freezing rain, then sleet, snow, rain. Blank where none falls.
+        ptype = np.full(g["crain"].shape, np.nan)
+        for k, code in (("crain", 1), ("csnow", 2), ("cicep", 3), ("cfrzr", 4)):
+            ptype = np.where(g[k] >= 0.5, code, ptype)
+    return {
+        "refc": g.get("refc"), "t2": k_to_f(g["t2"]), "d2": k_to_f(g["d2"]) if "d2" in g else None,
+        "gust": g["gust"] * 2.23694 if "gust" in g else None, "msl": g["msl"] / 100 if "msl" in g else None,
+        "cape": g.get("cape"), "tp1": g["tp1"] / 25.4 if "tp1" in g else None,
+        "qpf": g["tpt"] / 25.4 if "tpt" in g else None, "snow": g["snow"] * 39.37 if "snow" in g else None,
+        "uh": g.get("uh"), "hail": g["hail"] * 39.37 if "hail" in g else None,
+        "smoke": g["smoke"] * 1e9 if "smoke" in g else None,  # kg/m3 -> micrograms/m3
+        "ptype": ptype, "winds": winds,
+    }
+
+
+def draw_rrfs(f, h):
+    ar = area("conus")
+    out = {
+        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "temp": temp_pic(ar, f["t2"]),
+        "rain1": rain_pic(ar, f["tp1"], "rain1", f["msl"], 14),
+        "gust": picture(ar, fill(f["gust"], "gust")),
+        "uh": picture(ar, fill(f["uh"], "uh"), sharp=True),
+        "dew": picture(ar, fill(f["d2"], "dew")),
+        "cape": picture(ar, fill(f["cape"], "cape")),
+        "qpf": picture(ar, fill(f["qpf"], "qpf")),
+        "snow": picture(ar, fill(f["snow"], "snow")),
+        "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
+        "smoke": picture(ar, fill(f["smoke"], "smoke")),
+        "ptype": picture(ar, fill(f["ptype"], "ptype"), sharp=True),
+    }
+    if f["msl"] is not None and "u10" in f["winds"]:
+        out["mslp"] = mslp_pic(ar, f["msl"], *f["winds"]["u10"], 16)
+    return out
+
+
+# GEFS: NOAA's global ensemble, 31 runs (a control run and 30 with small changes)
+# out to 16 days. We count how many runs show each event at each spot. 00 and 12
+# UTC runs, every 6 hours, from the 0.5 degree files.
+GEFS_MEMBERS = ["gec00"] + [f"gep{i:02d}" for i in range(1, 31)]
+GEFS_HOURS = list(range(6, 385, 6))
+
+
+def gefs_url(run, h, member):
+    return f"{GEFS}/gefs.{run[:8]}/{run[8:]}/atmos/pgrb2ap5/{member}.t{run[8:]}z.pgrb2a.0p50.f{h:03d}"
+
+
+def gefs_latest(now):
+    t = now.replace(minute=0, second=0, microsecond=0)
+    t -= dt.timedelta(hours=t.hour % 12)
+    for _ in range(4):
+        run = t.strftime("%Y%m%d%H")
+        if all(exists(gefs_url(run, GEFS_HOURS[-1], m) + ".idx") for m in (GEFS_MEMBERS[0], GEFS_MEMBERS[-1])):
+            return run
+        t -= dt.timedelta(hours=12)
+    return None
+
+
+def gefs_member(run, h, member):
+    """One member's fields on GEFS's own 0.5 degree grid (small; the chances are
+    worked out on this grid and only the results are put on the map pixels)."""
+    want = {
+        "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+        "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground",
+        "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
+        "z500": lambda v, lv, f, r: v == "HGT" and lv == "500 mb",
+        "tp6": lambda v, lv, f, r: v == "APCP" and f == f"{hour_window(h, 6)} acc fcst",
+    }
+    url = gefs_url(run, h, member)
+    spans = idx_spans(get(url + ".idx").decode(), want)
+    return {k: decode(v) for k, v in ranges_get(url, spans).items()}
+
+
+class GefsRun:
+    """Downloads every member hour by hour, in order (24-hour rain adds up each
+    member's last four 6-hour amounts), and turns them into chances."""
+
+    def __init__(self, run):
+        self.run, self.recent = run, {}
+
+    def fields(self, h):
+        n = 0
+        freeze = wind = zsum = zsq = None
+        rain_half = rain_one = None
+        n_rain = 0
+        geo = None
+        with cf.ThreadPoolExecutor(max_workers=8) as pool:
+            for m, g in zip(GEFS_MEMBERS, pool.map(lambda m: gefs_member(self.run, h, m), GEFS_MEMBERS)):
+                geo = geo or g["t2"]
+                t2 = k_to_f(g["t2"].values)
+                w = np.hypot(g["u10"].values, g["v10"].values) * 2.23694
+                z = g["z500"].values / 10
+                if n == 0:
+                    freeze, wind = np.zeros_like(t2), np.zeros_like(t2)
+                    zsum, zsq = np.zeros_like(t2), np.zeros_like(t2)
+                    rain_half, rain_one = np.zeros_like(t2), np.zeros_like(t2)
+                freeze += t2 < 32
+                wind += w > 25
+                zsum += z
+                zsq += z * z
+                n += 1
+                tp6 = g["tp6"].values.astype(np.float32) if "tp6" in g else None
+                last = (self.recent.get(m) or [])[-3:] + [tp6]
+                self.recent[m] = last
+                if h >= 24 and len(last) == 4 and all(x is not None for x in last):
+                    r24 = sum(last) / 25.4  # mm -> in
+                    rain_half += r24 >= 0.5
+                    rain_one += r24 >= 1.0
+                    n_rain += 1
+        ar = area("na")
+        on_map = lambda a: Grid(a, geo.lat0, geo.dlat, geo.lon0, geo.dlon).sample(ar)  # noqa: E731
+        mean = zsum / n
+        out = {
+            "freeze": on_map(freeze * 100 / n), "wind25": on_map(wind * 100 / n),
+            "z500": on_map(mean), "spread": on_map(np.sqrt(np.clip(zsq / n - mean * mean, 0, None)) * 10),  # dam -> m
+        }
+        if n_rain >= n * 0.8:
+            out["rain24half"] = on_map(rain_half * 100 / n_rain)
+            out["rain24one"] = on_map(rain_one * 100 / n_rain)
+        return out
+
+
+def draw_gefs(f, h):
+    ar = area("na")
+    out = {
+        "freeze": picture(ar, fill(f["freeze"], "prob")),
+        "wind25": picture(ar, fill(f["wind25"], "prob")),
+        "spread500": picture(ar, colorize(smooth(f["spread"], 2), "spread"),
+                             [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.0, True, False)]),
+    }
+    for k in ("rain24half", "rain24one"):  # blank for the first day
+        out[k] = picture(ar, fill(f.get(k), "prob"))
+    return out
+
+
+_gefs_runs = {}
+
+
+def gefs_fields(run, h):
+    return _gefs_runs.setdefault(run, GefsRun(run)).fields(h)
+
+
+# NBM: the National Blend of Models, the starting point for the National Weather
+# Service's own forecasts. Lower 48 at 2.5 km; drawn every 6 hours to 11 days.
+NBM_HOURS = list(range(6, 265, 6))
+
+
+def nbm_url(run, h):
+    return f"{NBM}/blend.{run[:8]}/{run[8:]}/core/blend.t{run[8:]}z.core.f{h:03d}.co.grib2"
+
+
+def nbm_fields(run, h):
+    w6, now = f"{hour_window(h, 6)} acc fcst", f"{h} hour fcst"
+    want = {
+        "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground" and f == now and r == "",
+        "gust": lambda v, lv, f, r: v == "GUST" and lv == "10 m above ground" and f == now and r == "",
+        "sky": lambda v, lv, f, r: v == "TCDC" and lv == "surface" and f == now and r == "",
+        "w80": lambda v, lv, f, r: v == "WIND" and lv == "80 m above ground" and f == now and r == "",
+        "tp6": lambda v, lv, f, r: v == "APCP" and lv == "surface" and f == w6 and r == "",
+        "pop6": lambda v, lv, f, r: v == "APCP" and lv == "surface" and f == w6 and r.startswith("prob >0.254"),
+        "tstm": lambda v, lv, f, r: v == "TSTM" and f == w6,
+        "snow6": lambda v, lv, f, r: v == "ASNOW" and lv == "surface" and f == w6 and r == "",
+        "ice6": lambda v, lv, f, r: v == "FICEAC" and lv == "surface" and f == w6 and r == "",
+    }
+    spans = idx_spans(get(nbm_url(run, h) + ".idx").decode(), want)
+    raw = ranges_get(nbm_url(run, h), spans)
+    ar = area("conus")
+    g = {k: decode(v).sample(ar) for k, v in raw.items()}
+    mph = lambda k: g[k] * 2.23694 if k in g else None  # noqa: E731
+    return {
+        "t2": k_to_f(g["t2"]), "gust": mph("gust"), "w80": mph("w80"), "sky": g.get("sky"),
+        "tp6": g["tp6"] / 25.4 if "tp6" in g else None, "pop6": g.get("pop6"), "tstm": g.get("tstm"),
+        "snow6": g["snow6"] * 39.37 if "snow6" in g else None,  # m -> in
+        "ice6": g["ice6"] / 25.4 if "ice6" in g else None,  # kg/m2 = mm of ice -> in
+    }
+
+
+def draw_nbm(f, h):
+    ar = area("conus")
+    return {
+        "temp": temp_pic(ar, f["t2"]),
+        "pop6": picture(ar, fill(f["pop6"], "chance")),
+        "tstm": picture(ar, fill(f["tstm"], "chance")),
+        "rain6": picture(ar, fill(f["tp6"], "rain6")),
+        "snow6": picture(ar, fill(f["snow6"], "snow6")),
+        "ice6": picture(ar, fill(f["ice6"], "ice")),
+        "gust": picture(ar, fill(f["gust"], "gust")),
+        "sky": picture(ar, fill(f["sky"], "sky")),
+        "wind80": picture(ar, fill(f["w80"], "wind80")),
+    }
+
+
+# The AI models: NOAA's AIGFS (built on Google DeepMind's GraphCast, run and
+# published by NOAA) and ECMWF's AIFS. Both every 6 hours; 00 and 12 UTC runs.
+AI_HOURS = list(range(0, 361, 6))
+AI_MAPS = ["temp", "precip", "wind", "upper", "dew", "qpf", "mslp", "wind100"]
+
+
+def aigfs_url(run, h, part):
+    return f"{AIGFS}/aigfs.{run[:8]}/{run[8:]}/model/atmos/grib2/aigfs.t{run[8:]}z.{part}.f{h:03d}.grib2"
+
+
+def aigfs_fields(run, h):
+    total = (f"0-{h} hour acc fcst", f"0-{h // 24} day acc fcst")
+    sfc = {
+        "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+        "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground",
+        "msl": lambda v, lv, f, r: v == "PRMSL",
+        "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground",
+        "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
+        "u100": lambda v, lv, f, r: v == "UGRD" and lv == "100 m above ground",
+        "v100": lambda v, lv, f, r: v == "VGRD" and lv == "100 m above ground",
+        "tp6": lambda v, lv, f, r: h >= 6 and v == "APCP" and f == f"{hour_window(h, 6)} acc fcst",
+        "tpt": lambda v, lv, f, r: h >= 6 and v == "APCP" and f in total,
+    }
+    pres = {
+        "z500": lambda v, lv, f, r: v == "HGT" and lv == "500 mb",
+        "u250": lambda v, lv, f, r: v == "UGRD" and lv == "250 mb",
+        "v250": lambda v, lv, f, r: v == "VGRD" and lv == "250 mb",
+    }
+    ar = area("na")
+    g = {}
+    for part, want in (("sfc", sfc), ("pres", pres)):
+        url = aigfs_url(run, h, part)
+        spans = idx_spans(get(url + ".idx").decode(), want)
+        for k, v in ranges_get(url, spans).items():
+            g[k] = decode(v).sample(ar)
+    return ai_out(g, g["tp6"] / 25.4 if "tp6" in g else None, g["tpt"] / 25.4 if "tpt" in g else None)
+
+
+AIFS_WANT = {("2t", None): "t2", ("2d", None): "d2", ("msl", None): "msl", ("10u", None): "u10", ("10v", None): "v10",
+             ("100u", None): "u100", ("100v", None): "v100", ("gh", "500"): "z500", ("u", "250"): "u250",
+             ("v", "250"): "v250", ("sf", None): "sf"}
+
+
+def aifs_fields(run, h):
+    g = ec_grids(run, h, "aifs-single", AIFS_WANT)
+    out = ai_out(g, ec_tp6(run, h, "aifs-single"), ec_tp(run, h, "aifs-single") if h >= 6 else None)
+    # Snowfall comes as kg/m2 (mm) of melted water; 10 inches of snow per inch of water.
+    out["snow"] = g["sf"] / 25.4 * 10 if h >= 6 and "sf" in g else None
+    return out
+
+
+def ai_out(g, tp6, qpf):
+    """Map fields shared by the two AI models (same units as the GFS maps)."""
+    out = {
+        "t2": k_to_f(g["t2"]), "msl": g["msl"] / 100, "w10": np.hypot(g["u10"], g["v10"]) * 2.23694,
+        "z500": g["z500"] / 10, "w250": np.hypot(g["u250"], g["v250"]) * 2.23694, "tp6": tp6, "qpf": qpf,
+        "d2": k_to_f(g["d2"]) if "d2" in g else None,
+        "u10kt": g["u10"] * KT, "v10kt": g["v10"] * KT,
+    }
+    if "u100" in g and "v100" in g:
+        out["w100"] = np.hypot(g["u100"], g["v100"]) * 2.23694
+    return out
+
+
+def draw_ai(f, h):
+    ar = area("na")
+    out = {
+        "temp": temp_pic(ar, f["t2"]),
+        "wind": picture(ar, colorize(f["w10"], "wind")),
+        "upper": picture(ar, colorize(f["w250"], "upper"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.0, True, False)]),
+        "mslp": mslp_pic(ar, f["msl"], f["u10kt"], f["v10kt"], 6),
+        "precip": rain_pic(ar, f.get("tp6"), "precip", f["msl"]),
+        "dew": picture(ar, fill(f.get("d2"), "dew")),
+        "qpf": picture(ar, fill(f.get("qpf"), "qpf")),
+        "wind100": picture(ar, fill(f.get("w100"), "wind100")),
+    }
+    if "snow" in f:  # ECMWF's AIFS has snowfall; NOAA's AIGFS doesn't
+        out["snow"] = picture(ar, fill(f["snow"], "snow"))
+    return out
+
+
+# NAM 3 km and the HiResW (HRW) models: NOAA is retiring them (with HREF) once
+# RRFS and REFS take over. They stay on the page until NOAA stops making them;
+# after SUNSET_DAYS with no new run, the job takes them off the page.
+NAM = "https://noaa-nam-pds.s3.amazonaws.com"
+HIRESW = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/hiresw/prod"
+SUNSET = {"href", "nam", "hrwarw", "hrwarw2", "hrwfv3"}
+SUNSET_DAYS = 3
+
+
+def nam_url(run, h):
+    return f"{NAM}/nam.{run[:8]}/nam.t{run[8:]}z.conusnest.hiresf{h:02d}.tm00.grib2"
+
+
+def hiresw_url(kind):
+    """kind: arw, arw2 (ARW member 2) or fv3, lower-48 files on NOMADS (2.5 km; ARW
+    member 2 only comes at 5 km)."""
+    core, tail = {"arw": ("arw_2p5km", "conus"), "arw2": ("arw_5km", "conusmem2"), "fv3": ("fv3_2p5km", "conus")}[kind]
+
+    def url(run, h):
+        return f"{HIRESW}/hiresw.{run[:8]}/hiresw.t{run[8:]}z.{core}.f{h:02d}.{tail}.grib2"
+    return url
+
+
+def storm_model_fields(url):
+    """Common maps from a single 3 km-class storm model (NAM 3 km, HiResW). Fields a
+    model doesn't have come out blank."""
+    def fields(run, h):
+        win, now = hour_window(h, 1), (f"{h} hour fcst", "anl")
+        total = (f"0-{h} hour acc fcst", f"0-{h // 24} day acc fcst")
+        # HiResW files also hold the two hours before (e.g. 2 m temperature at 11 and
+        # 10 hours in the 12-hour file), so instant fields must match the hour.
+        want = {
+            "refc": lambda v, lv, f, r: v == "REFC" and lv.startswith("entire atmosphere") and f in now,
+            "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground" and f in now,
+            "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground" and f in now,
+            "gust": lambda v, lv, f, r: v == "GUST" and lv == "surface" and f in now,
+            "msl": lambda v, lv, f, r: v in ("MSLET", "PRMSL") and lv == "mean sea level" and f in now,
+            "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground" and f in now,
+            "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground" and f in now,
+            "cape": lambda v, lv, f, r: v == "CAPE" and lv == "surface" and f in now,
+            "uh": lambda v, lv, f, r: h >= 1 and v == "MXUPHL" and lv == "5000-2000 m above ground" and f == f"{win} max fcst",
+            "tpt": lambda v, lv, f, r: h >= 1 and v == "APCP" and f in total,
+        }
+        u = url(run, h)
+        text = get(u + ".idx").decode()
+        spans = idx_spans(text, want)
+        if "t2" not in spans:
+            print(f"  {u.rsplit('/', 1)[-1]}: no 2 m temperature; fields: "
+                  + "; ".join(":".join(x.split(":")[3:6]) for x in text.splitlines()[:40]), flush=True)
+        grids = {k: decode(v) for k, v in unpack_parts(ranges_get(u, spans), spans).items()}
+        ar = area("conus")
+        winds = {}
+        if "u10" in grids and "v10" in grids:
+            uu, vv = earth_wind(grids.pop("u10"), grids.pop("v10"), ar)
+            winds["u10"] = (uu * KT, vv * KT)
+        g = {k: v.sample(ar) for k, v in grids.items()}
+        return {
+            "refc": g.get("refc"), "t2": k_to_f(g["t2"]) if "t2" in g else None, "d2": k_to_f(g["d2"]) if "d2" in g else None,
+            "gust": g["gust"] * 2.23694 if "gust" in g else None, "msl": g["msl"] / 100 if "msl" in g else None,
+            "cape": g.get("cape"), "uh": g.get("uh"), "qpf": g["tpt"] / 25.4 if "tpt" in g else None, "winds": winds,
+        }
+    return fields
+
+
+def draw_storm_model(f, h):
+    ar = area("conus")
+    out = {
+        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "temp": temp_pic(ar, f["t2"]) if f["t2"] is not None else picture(ar, None),
+        "dew": picture(ar, fill(f["d2"], "dew")),
+        "gust": picture(ar, fill(f["gust"], "gust")),
+        "cape": picture(ar, fill(f["cape"], "cape")),
+        "uh": picture(ar, fill(f["uh"], "uh"), sharp=True),
+        "qpf": picture(ar, fill(f["qpf"], "qpf")),
+    }
+    if f["msl"] is not None and "u10" in f["winds"]:
+        out["mslp"] = mslp_pic(ar, f["msl"], *f["winds"]["u10"], 16)
+    else:
+        out["mslp"] = picture(ar, None)
+    if f["qpf"] is None:
+        del out["qpf"]
+    return out
+
+
+STORM_MAPS = ["radar", "temp", "dew", "gust", "cape", "uh", "qpf", "mslp"]
 
 
 # ---- drawing ------------------------------------------------------------------
@@ -1312,6 +1878,28 @@ def current_manifest():
         return {"models": {}}
 
 
+def retire(model, manifest):
+    """Take a model NOAA no longer makes off the website's map list (and delete its pictures)."""
+    part = {k: v for k, v in manifest.items() if k != "models"}
+    part.update({"retired": [model], "order": list(MODELS)})
+    print(send("POST", "/weather/models/upload/manifest-part", json.dumps(part).encode(), "application/json"))
+
+
+def publish(model, manifest):
+    """Add one model's run to the website's map list. Other model groups run as
+    separate jobs at the same time, so the website merges this one model into its
+    own copy of the list. A website that doesn't have that yet gets the whole list."""
+    part = {k: v for k, v in manifest.items() if k != "models"}
+    part.update({"model": model, "entry": manifest["models"][model], "retired": sorted(RETIRED), "order": list(MODELS)})
+    try:
+        print(send("POST", "/weather/models/upload/manifest-part", json.dumps(part).encode(), "application/json"))
+        return
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    print(send("POST", "/weather/models/upload/manifest", json.dumps(manifest).encode(), "application/json"))
+
+
 # ---- main ---------------------------------------------------------------------
 
 UPPER_MAPS = ["h200", "h300", "h500", "h700", "h850"]
@@ -1319,16 +1907,43 @@ HRRR_MESO = ["mlcape", "cin", "shear6", "shear1", "srh1", "lapse", "pwat", "stp"
              "jet250", "jet300", "h500", "h700", "h850"]
 
 MODELS = {
-    "gfs": {"name": "GFS (NOAA)", "latest": gfs_latest, "fields": gfs_fields, "draw": draw, "area": "na",
+    "gfs": {"name": "GFS", "latest": gfs_latest, "fields": gfs_fields, "draw": draw, "area": "na",
             "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "mslp", "shear"] + UPPER_MAPS},
-    "ecmwf": {"name": "European (ECMWF)", "latest": ec_latest, "fields": ec_fields, "draw": draw, "area": "na",
+    "ecmwf": {"name": "European", "latest": ec_latest, "fields": ec_fields, "draw": draw, "area": "na",
               "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow", "mslp", "shear"] + UPPER_MAPS},
-    "hrrr": {"name": "HRRR (NOAA, 2 days)", "latest": short_latest(hrrr_url, 48), "fields": hrrr_fields, "draw": draw_hrrr,
+    "aigfs": {"name": "AI GFS", "latest": short_latest(lambda r, h: aigfs_url(r, h, "sfc"), AI_HOURS[-1], every=12),
+              "fields": aigfs_fields, "draw": draw_ai, "area": "na", "hours": AI_HOURS,
+              "maps": AI_MAPS},
+    "aifs": {"name": "European AI", "latest": lambda now: ec_latest(now, "aifs-single", AI_HOURS[-1]),
+             "fields": aifs_fields, "draw": draw_ai, "area": "na", "hours": AI_HOURS, "maps": AI_MAPS + ["snow"]},
+    "gefs": {"name": "GEFS chances", "latest": gefs_latest, "fields": gefs_fields, "draw": draw_gefs,
+             "area": "na", "hours": GEFS_HOURS, "workers": 1,
+             "maps": ["rain24half", "rain24one", "freeze", "wind25", "spread500"]},
+    "nbm": {"name": "NBM blend", "latest": short_latest(nbm_url, NBM_HOURS[-1], every=12), "fields": nbm_fields,
+            "draw": draw_nbm, "area": "conus", "hours": NBM_HOURS,
+            "maps": ["temp", "pop6", "tstm", "rain6", "snow6", "ice6", "gust", "sky", "wind80"]},
+    "hrrr": {"name": "HRRR", "latest": short_latest(hrrr_url, 48), "fields": hrrr_fields, "draw": draw_hrrr,
              "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"] + HRRR_MESO,
              "points": True},
-    "href": {"name": "HREF (NOAA blend, 2 days)", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
+    "rrfs": {"name": "RRFS", "latest": short_latest(rrfs_url, RRFS_HOURS[-1], every=12), "fields": rrfs_fields,
+             "draw": draw_rrfs, "area": "conus", "hours": RRFS_HOURS,
+             "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "smoke", "ptype", "mslp"]},
+    "refs": {"name": "REFS chances", "latest": short_latest(refs_url, 60, every=12), "fields": refs_fields,
+             "draw": draw_refs, "area": "conus", "hours": list(range(1, 61)),
+             "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy", "freeze", "pfrzra", "wind34", "fog"]},
+    # Being retired by NOAA (see SUNSET): shown until NOAA stops making them.
+    "href": {"name": "HREF", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
              "area": "conus", "hours": list(range(1, 49)), "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy"]},
+    "nam": {"name": "NAM 3 km", "latest": short_latest(nam_url, 60, every=12), "fields": storm_model_fields(nam_url),
+            "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 61)),
+            "maps": [m for m in STORM_MAPS if m != "qpf"]},  # NAM rain comes in 3-hour pieces, not run totals
+    **{f"hrw{k}": {"name": name, "latest": short_latest(hiresw_url(k), 48, every=12), "fields": storm_model_fields(hiresw_url(k)),
+                   "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 49)), "maps": STORM_MAPS}
+       for k, name in (("arw", "HRW ARW"), ("arw2", "HRW ARW2"), ("fv3", "HRW FV3"))},
 }
+DEFAULT_MODELS = list(MODELS)
+# Taken off the page by hand: dropped from the map list the next time any model uploads.
+RETIRED = set()
 
 
 def points_bytes(by_hour, hours):
@@ -1367,7 +1982,9 @@ def render_model(model, run, hours, out_dir, upload, points=None):
 
     done = []
     # ECMWF precipitation needs the hour before, so its hours go in order per worker.
-    with cf.ThreadPoolExecutor(max_workers=4) as pool:
+    # GEFS adds up 24-hour rain from the hours before, so it draws one hour at a time
+    # (each hour downloads its 31 members side by side).
+    with cf.ThreadPoolExecutor(max_workers=spec.get("workers", 4)) as pool:
         for h in pool.map(one, hours):
             done.append(h)
             print(f"  {model} {run} +{h}h", flush=True)
@@ -1379,7 +1996,7 @@ def main():
     ap.add_argument("--out", help="also save pictures into this folder")
     ap.add_argument("--upload", action="store_true", help="upload to the website")
     ap.add_argument("--hours", help="comma list for a quick test, e.g. 0,6,12")
-    ap.add_argument("--models", default=",".join(MODELS))
+    ap.add_argument("--models", default=",".join(DEFAULT_MODELS))
     ap.add_argument("--force", action="store_true", help="draw even if this run is already up")
     ap.add_argument("--no-soundings", action="store_true", help="skip the click-anywhere sounding grids")
     a = ap.parse_args()
@@ -1391,7 +2008,7 @@ def main():
     current = current_manifest() if a.upload else {"models": {}}
     manifest = {"updated": now.isoformat(timespec="seconds"), "bbox": list(BBOX), "legends": LEGENDS,
                 "names": FIELD_NAMES, "fieldLegend": FIELD_LEGEND,
-                "credit": "NOAA NCEP GFS, HRRR and HREF; ECMWF open data, CC BY 4.0",
+                "credit": "NOAA NCEP GFS, AIGFS, GEFS, NBM, HRRR, RRFS, REFS, HREF, NAM and HiResW; ECMWF open data (IFS and AIFS), CC BY 4.0",
                 "models": dict(current.get("models") or {})}
     order = {k: i for i, k in enumerate(MODELS)}
     failed = []
@@ -1401,6 +2018,14 @@ def main():
             run = spec["latest"](now)
             if not run:
                 print(f"{model}: no complete run found")
+                last = (manifest["models"].get(model) or {}).get("run")
+                if model in SUNSET and last and now - dt.datetime.strptime(last, "%Y%m%d%H").replace(
+                        tzinfo=dt.timezone.utc) > dt.timedelta(days=SUNSET_DAYS):
+                    # NOAA has stopped this model: take it off the page.
+                    print(f"{model}: no new run since {last}; taking it off the page")
+                    manifest["models"].pop(model, None)
+                    if a.upload:
+                        retire(model, manifest)
                 continue
             old = manifest["models"].get(model) or {}
             if old.get("run") == run and not a.force:
@@ -1449,10 +2074,12 @@ def main():
             manifest["models"][model]["points"] = point_info
         if snd:
             manifest["models"][model]["snd"] = snd
-        manifest["models"] = dict(sorted(manifest["models"].items(), key=lambda kv: order.get(kv[0], 9)))
+        for gone in RETIRED:
+            manifest["models"].pop(gone, None)
+        manifest["models"] = dict(sorted(manifest["models"].items(), key=lambda kv: order.get(kv[0], 99)))
         # Publish after each model so a slow or failed model doesn't hold the others back.
         if a.upload:
-            print(send("POST", "/weather/models/upload/manifest", json.dumps(manifest).encode(), "application/json"))
+            publish(model, manifest)
     if a.out:
         with open(os.path.join(a.out, "manifest.json"), "w") as f:
             json.dump(manifest, f)
