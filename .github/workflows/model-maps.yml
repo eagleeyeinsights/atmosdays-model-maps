@@ -68,7 +68,7 @@ jobs:
         run: python render_models.py --upload --models "$MODELS" $FORCE
       - name: Peek at HiResW (temporary)
         if: ${{ inputs.test_only }}
-        run: python tools/peek_hiresw.py 20261029
+        run: python tools/peek_hiresw.py 20261029 && python render_models.py --models hrwarw --hours 0,1,2,3 --no-soundings --out /tmp/x || true
       - name: Test drawing (nothing uploaded)
         if: ${{ inputs.test_only }}
         env:

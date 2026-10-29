@@ -1371,11 +1371,12 @@ def nam_url(run, h):
 
 
 def hiresw_url(kind):
-    """kind: arw, arw2 (ARW member 2) or fv3; 2.5 km lower-48 files on NOMADS."""
-    core, tail = {"arw": ("arw", "conus"), "arw2": ("arw", "conusmem2"), "fv3": ("fv3", "conus")}[kind]
+    """kind: arw, arw2 (ARW member 2) or fv3, lower-48 files on NOMADS (2.5 km; ARW
+    member 2 only comes at 5 km)."""
+    core, tail = {"arw": ("arw_2p5km", "conus"), "arw2": ("arw_5km", "conusmem2"), "fv3": ("fv3_2p5km", "conus")}[kind]
 
     def url(run, h):
-        return f"{HIRESW}/hiresw.{run[:8]}/hiresw.t{run[8:]}z.{core}_2p5km.f{h:02d}.{tail}.grib2"
+        return f"{HIRESW}/hiresw.{run[:8]}/hiresw.t{run[8:]}z.{core}.f{h:02d}.{tail}.grib2"
     return url
 
 
@@ -1383,22 +1384,28 @@ def storm_model_fields(url):
     """Common maps from a single 3 km-class storm model (NAM 3 km, HiResW). Fields a
     model doesn't have come out blank."""
     def fields(run, h):
-        win = hour_window(h, 1)
+        win, now = hour_window(h, 1), (f"{h} hour fcst", "anl")
         total = (f"0-{h} hour acc fcst", f"0-{h // 24} day acc fcst")
+        # HiResW files also hold the two hours before (e.g. 2 m temperature at 11 and
+        # 10 hours in the 12-hour file), so instant fields must match the hour.
         want = {
-            "refc": lambda v, lv, f, r: v == "REFC" and lv.startswith("entire atmosphere"),
-            "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
-            "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground",
-            "gust": lambda v, lv, f, r: v == "GUST" and lv == "surface",
-            "msl": lambda v, lv, f, r: v in ("MSLET", "PRMSL") and lv == "mean sea level",
-            "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground",
-            "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground",
-            "cape": lambda v, lv, f, r: v == "CAPE" and lv == "surface",
+            "refc": lambda v, lv, f, r: v == "REFC" and lv.startswith("entire atmosphere") and f in now,
+            "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground" and f in now,
+            "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground" and f in now,
+            "gust": lambda v, lv, f, r: v == "GUST" and lv == "surface" and f in now,
+            "msl": lambda v, lv, f, r: v in ("MSLET", "PRMSL") and lv == "mean sea level" and f in now,
+            "u10": lambda v, lv, f, r: v == "UGRD" and lv == "10 m above ground" and f in now,
+            "v10": lambda v, lv, f, r: v == "VGRD" and lv == "10 m above ground" and f in now,
+            "cape": lambda v, lv, f, r: v == "CAPE" and lv == "surface" and f in now,
             "uh": lambda v, lv, f, r: h >= 1 and v == "MXUPHL" and lv == "5000-2000 m above ground" and f == f"{win} max fcst",
             "tpt": lambda v, lv, f, r: h >= 1 and v == "APCP" and f in total,
         }
         u = url(run, h)
-        spans = idx_spans(get(u + ".idx").decode(), want)
+        text = get(u + ".idx").decode()
+        spans = idx_spans(text, want)
+        if "t2" not in spans:
+            print(f"  {u.rsplit('/', 1)[-1]}: no 2 m temperature; fields: "
+                  + "; ".join(":".join(x.split(":")[3:6]) for x in text.splitlines()[:40]), flush=True)
         grids = {k: decode(v) for k, v in unpack_parts(ranges_get(u, spans), spans).items()}
         ar = area("conus")
         winds = {}
@@ -1407,7 +1414,7 @@ def storm_model_fields(url):
             winds["u10"] = (uu * KT, vv * KT)
         g = {k: v.sample(ar) for k, v in grids.items()}
         return {
-            "refc": g.get("refc"), "t2": k_to_f(g["t2"]), "d2": k_to_f(g["d2"]) if "d2" in g else None,
+            "refc": g.get("refc"), "t2": k_to_f(g["t2"]) if "t2" in g else None, "d2": k_to_f(g["d2"]) if "d2" in g else None,
             "gust": g["gust"] * 2.23694 if "gust" in g else None, "msl": g["msl"] / 100 if "msl" in g else None,
             "cape": g.get("cape"), "uh": g.get("uh"), "qpf": g["tpt"] / 25.4 if "tpt" in g else None, "winds": winds,
         }
@@ -1418,7 +1425,7 @@ def draw_storm_model(f, h):
     ar = area("conus")
     out = {
         "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
-        "temp": temp_pic(ar, f["t2"]),
+        "temp": temp_pic(ar, f["t2"]) if f["t2"] is not None else picture(ar, None),
         "dew": picture(ar, fill(f["d2"], "dew")),
         "gust": picture(ar, fill(f["gust"], "gust")),
         "cape": picture(ar, fill(f["cape"], "cape")),
