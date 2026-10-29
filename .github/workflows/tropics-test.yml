@@ -16,5 +16,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python tropics.py --test --recon-sample 4 --out out/tropics.json
+      - run: python tropics.py --test --recon-sample 8 --out out/tropics.json
       - run: python -c "import json;d=json.load(open('out/tropics.json'));r=d['recon'];[x.pop('raw') for x in r['fixes']];print(json.dumps(r['fixes'],indent=0)[:4000]);f=r['flights'];print(json.dumps([(x['aircraft'],x['mission'],x['storm'],[(o['time'],o['pts'][:2]) for o in x['obs']]) for x in f]) if f else 'no flights')"
+      - run: gzip -9c out/tropics.json | base64 -w 0; echo
