@@ -54,7 +54,11 @@ AREAS = {
 BBOX = AREAS["na"][0]
 HOURS = list(range(0, 241, 6))
 FIELDS = ["temp", "precip", "wind", "upper"]
-KEEP_RUNS = 2  # newest run plus the one before
+# Runs kept per model for the website's "Run" picker (newest plus older ones).
+# Older runs keep only their map pictures; the website deletes their sounding and
+# wind grids, which are the big files. 4 runs = the last day of HRRR runs (every
+# 6 hours) and the last 2 days of the 12-hour models.
+KEEP_RUNS = 4
 
 # HRRR wind at every spot in the lower 48, for the website's "wind at crane
 # height" on each job: a 0.1 degree grid, one byte (mph) per field and hour,
@@ -1870,6 +1874,21 @@ def send(method, path, body, content_type):
     raise err
 
 
+def past_runs(old, run, keep_runs):
+    """Older runs still in storage, newest first, for the website's run picker:
+    the run being replaced plus the ones it already listed, up to keep_runs in all."""
+    out, seen = [], {run}
+    prev = [{"run": old.get("run"), "hours": old.get("hours"), "fields": old.get("fields")}] + list(old.get("past") or [])
+    for p in prev:
+        r = p.get("run")
+        if not r or r in seen or not p.get("hours"):
+            continue
+        seen.add(r)
+        out.append({"run": r, "hours": p["hours"], "fields": p.get("fields") or []})
+    # Older manifests only listed run names in "keep", without hours: those runs can't be picked.
+    return out[: max(0, keep_runs - 1)]
+
+
 def current_manifest():
     try:
         with urllib.request.urlopen(urllib.request.Request(f"{site()}/weather/api/models", headers={"User-Agent": UA}), timeout=30) as r:
@@ -2063,10 +2082,10 @@ def main():
             print(f"{model}: FAILED: {e!r}", flush=True)
             failed.append(model)
             continue
-        keep = [r for r in [old.get("run")] if r and r != run][: KEEP_RUNS - 1]
+        past = past_runs(old, run, spec.get("keep", KEEP_RUNS))
         ar = AREAS[spec["area"]][0]
         manifest["models"][model] = {"name": spec["name"], "run": run, "hours": sorted(done), "fields": spec["maps"],
-                                     "bbox": list(ar), "ext": "webp", "keep": keep}
+                                     "bbox": list(ar), "ext": "webp", "past": past, "keep": [p["run"] for p in past]}
         if point_info:
             manifest["models"][model]["points"] = point_info
         if snd:
