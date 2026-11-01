@@ -250,6 +250,24 @@ FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70
         "t3h": ("abs", 1, 3), "td3h": ("abs", 1, 3), "cape3h": ("abs", 100, 300)}
 
 
+# Color bands, like the filled maps on NOAA and most weather sites: every value
+# in a band gets one color, so edges are crisp instead of a soft blend. A number
+# is the band width (temperature every 2 °F); "stops" means one band per legend
+# stop (rain 0.1, 0.25, 0.5 inch ...).
+BANDS = {
+    "temp": 2, "dew": 2, "t850": 1, "t3h": 1, "td3h": 1,
+    "wind": 5, "gust": 5, "wind80": 5, "wind100": 5, "upper": 10, "jet200": 10, "jet250": 10, "jet300": 10,
+    "jet300d": 10, "shear1": 5, "shear5": 5, "shear6": 5,
+    "cape": 250, "mlcape": 250, "cape3h": 250, "cin": 25, "srh1": 25, "lapse": 0.25, "pwat": 0.1,
+    "vort": 2, "rh700": 5, "spread": 5, "sky": 10, "stp": 0.5, "scp": 1, "mslp": 2,
+    **{k: "stops" for k in ("precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice", "hail", "ltng", "uh",
+                            "prob", "chance", "smoke")},
+}
+# How solid the colors are (0-255). Full strength, so a color means the same
+# value it does on other weather sites; the page itself lets a little map show through.
+SOLID = 250
+
+
 def colorize(values, field):
     leg = LEGENDS[field]
     stops = leg["stops"]
@@ -257,20 +275,25 @@ def colorize(values, field):
     cols = np.array([hexc(s[1]) for s in stops], float)
     v = np.nan_to_num(values, nan=-9999)
     rgba = np.zeros(values.shape + (4,), np.uint8)
-    if leg.get("steps"):
+    raw = v
+    band = BANDS.get(field)
+    if isinstance(band, (int, float)):
+        # Color each band by its middle, so 32-33.9 °F is one shade (above freezing).
+        v = np.floor(v / band) * band + band / 2
+    if leg.get("steps") or band == "stops":
         idx = np.clip(np.searchsorted(xs, v, side="right") - 1, 0, len(xs) - 1)
         rgba[..., :3] = cols[idx].astype(np.uint8)
     else:
         for c in range(3):
             rgba[..., c] = np.interp(v, xs, cols[:, c]).astype(np.uint8)
     fade = FADE[field]
-    top = leg.get("alpha", 215)
+    top = leg.get("alpha", SOLID)
     if fade is None:
         alpha = np.full(values.shape, float(top))
     elif fade[0] == "abs":
-        alpha = np.clip((np.abs(v) - fade[1]) / (fade[2] - fade[1]), 0, 1) * top
+        alpha = np.clip((np.abs(raw) - fade[1]) / (fade[2] - fade[1]), 0, 1) * top
     else:
-        alpha = np.clip((v - fade[0]) / (fade[1] - fade[0]), 0, 1) * top
+        alpha = np.clip((raw - fade[0]) / (fade[1] - fade[0]), 0, 1) * top
     alpha[np.isnan(values)] = 0
     rgba[..., 3] = alpha.astype(np.uint8)
     return rgba
