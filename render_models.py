@@ -79,6 +79,10 @@ PROB_STOPS = [[10, "#d9f99d"], [20, "#86efac"], [30, "#22c55e"], [40, "#facc15"]
 WIND_STOPS = [[5, "#d8ecf3"], [10, "#9fd3e6"], [20, "#5ab4d6"], [30, "#3b8f4f"], [40, "#e8d54a"], [50, "#f08a2a"],
               [60, "#d7301f"], [75, "#8c1d6e"]]
 
+# Jet stream speed in knots, the unit weather maps use for winds aloft. Goes past
+# 200 kt so a strong winter jet still shows its fastest core.
+JET_STOPS = [[50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [150, "#ff6fae"], [170, "#fb7185"], [190, "#f59e0b"], [210, "#fde047"]]
+
 LEGENDS = {
     "temp": {"label": "Temperature", "unit": "°F", "stops": [
         [-30, "#e9dcf5"], [-10, "#8c6bb1"], [0, "#4a3fa8"], [10, "#2c5bc9"], [20, "#3d8fe0"], [32, "#9bd6f2"],
@@ -90,9 +94,8 @@ LEGENDS = {
     "wind": {"label": "Wind at 10 m", "unit": "mph", "stops": [
         [5, "#d8ecf3"], [10, "#9fd3e6"], [20, "#5ab4d6"], [30, "#3b8f4f"], [40, "#e8d54a"], [50, "#f08a2a"],
         [60, "#d7301f"], [75, "#8c1d6e"]]},
-    "upper": {"label": "Jet stream (250 mb wind)", "unit": "mph", "stops": [
-        [50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
-        "note": "Lines: 500 mb height, dam"},
+    "upper": {"label": "Jet stream (250 mb wind, about 34,000 ft)", "unit": "kt", "stops": JET_STOPS,
+        "note": "Barbs: wind in knots. Lines: 250 mb height, dam"},
     "radar": {"label": "Computer radar (what the model expects radar to show)", "unit": "dBZ", "steps": True, "stops": [
         [5, "#9be7f5"], [10, "#3fb7ee"], [15, "#2b6fe0"], [20, "#36d33a"], [25, "#20a72b"], [30, "#147a1d"],
         [35, "#f5ea2c"], [40, "#e7b81b"], [45, "#f58a12"], [50, "#e8221b"], [55, "#c01414"], [60, "#9b0c0c"],
@@ -126,15 +129,13 @@ LEGENDS = {
         [3.0, "#4c1d95"]], "note": "1 inch (quarter size) and up is severe"},
     "ltng": {"label": "Lightning", "unit": "flashes/km² per 5 min", "stops": [
         [0.05, "#fef9c3"], [0.25, "#fde047"], [0.5, "#f59e0b"], [1, "#ef4444"], [2, "#b91c1c"], [4, "#7e22ce"]]},
-    "jet200": {"label": "200 mb wind (about 39,000 ft): the jet stream", "unit": "mph", "stops": [
-        [50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
-        "note": "Lines: 200 mb height, dam"},
-    "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "mph", "stops": [
-        [50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
-        "note": "Lines: 300 mb height, dam"},
-    "jet250": {"label": "250 mb wind (about 34,000 ft): the jet stream", "unit": "mph", "stops": [[50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
+    "jet200": {"label": "200 mb wind (about 39,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
+        "note": "Barbs: wind in knots. Lines: 200 mb height, dam"},
+    "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
+        "note": "Barbs: wind in knots. Lines: 300 mb height, dam"},
+    "jet250": {"label": "250 mb wind (about 34,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Purple dashed lines: air spreading out aloft (divergence), which helps air rise below"},
-    "jet300d": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "mph", "stops": [[50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [160, "#ff6fae"]],
+    "jet300d": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Purple dashed lines: air spreading out aloft (divergence), which helps air rise below"},
     "mslp": {"label": "Sea-level pressure", "unit": "mb", "alpha": 110, "stops": [
         [984, "#7c3aed"], [996, "#60a5fa"], [1008, "#f1f5f9"], [1016, "#f1f5f9"], [1026, "#fca5a5"], [1036, "#dc2626"]],
@@ -206,7 +207,7 @@ LEGENDS = {
 
 # Picture name -> label for the map list on the page.
 FIELD_NAMES = {
-    "temp": "Temperature", "precip": "Rain and snow, with pressure", "wind": "Wind", "upper": "Jet stream and 500 mb",
+    "temp": "Temperature", "precip": "Rain and snow, with pressure", "wind": "Wind", "upper": "Jet stream (250 mb)",
     "radar": "Computer radar", "rain1": "Rain, 1 hour", "rain6": "Rain, 6 hours", "gust": "Wind gusts",
     "uh": "Storm rotation tracks", "storms40": "Chance of strong storms", "rotation": "Chance of rotating storms",
     "heavy": "Chance of 1 inch of rain in 3 hours",
@@ -237,17 +238,35 @@ FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "hea
                 "pop6": "chance", "tstm": "chance", "spread500": "spread", "ice6": "ice"}
 
 # Below these values the map stays see-through.
-FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (45, 70), "radar": (4, 6),
+FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (35, 50), "radar": (4, 6),
         "rain1": (0.005, 0.015), "rain6": (0.005, 0.02), "gust": (10, 20), "uh": (15, 30), "prob": (5, 12),
         "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08),
-        "jet200": (45, 70), "jet300": (45, 70), "vort": (10, 14), "rh700": (60, 75), "t850": None,
+        "jet200": (35, 50), "jet300": (35, 50), "vort": (10, 14), "rh700": (60, 75), "t850": None,
         "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
-        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (45, 70), "jet300d": (45, 70), "mslp": None,
+        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (35, 50), "jet300d": (35, 50), "mslp": None,
         "shear1": (8, 14), "shear5": (15, 25),
         "chance": (5, 12), "spread": (5, 12), "smoke": (3, 8), "ptype": (0.5, 0.6), "snow6": (0.05, 0.2),
         "ice": (0.005, 0.01), "sky": (5, 30), "wind80": (5, 15), "wind100": (5, 15),
         # Changes: see-through near zero, either way.
         "t3h": ("abs", 1, 3), "td3h": ("abs", 1, 3), "cape3h": ("abs", 100, 300)}
+
+
+# Color bands, like the filled maps on NOAA and most weather sites: every value
+# in a band gets one color, so edges are crisp instead of a soft blend. A number
+# is the band width (temperature every 2 °F); "stops" means one band per legend
+# stop (rain 0.1, 0.25, 0.5 inch ...).
+BANDS = {
+    "temp": 2, "dew": 2, "t850": 1, "t3h": 1, "td3h": 1,
+    "wind": 5, "gust": 5, "wind80": 5, "wind100": 5, "upper": 10, "jet200": 10, "jet250": 10, "jet300": 10,
+    "jet300d": 10, "shear1": 5, "shear5": 5, "shear6": 5,
+    "cape": 250, "mlcape": 250, "cape3h": 250, "cin": 25, "srh1": 25, "lapse": 0.25, "pwat": 0.1,
+    "vort": 2, "rh700": 5, "spread": 5, "sky": 10, "stp": 0.5, "scp": 1, "mslp": 2,
+    **{k: "stops" for k in ("precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice", "hail", "ltng", "uh",
+                            "prob", "chance", "smoke")},
+}
+# How solid the colors are (0-255). Full strength, so a color means the same
+# value it does on other weather sites; the page itself lets a little map show through.
+SOLID = 250
 
 
 def colorize(values, field):
@@ -257,20 +276,25 @@ def colorize(values, field):
     cols = np.array([hexc(s[1]) for s in stops], float)
     v = np.nan_to_num(values, nan=-9999)
     rgba = np.zeros(values.shape + (4,), np.uint8)
-    if leg.get("steps"):
+    raw = v
+    band = BANDS.get(field)
+    if isinstance(band, (int, float)):
+        # Color each band by its middle, so 32-33.9 °F is one shade (above freezing).
+        v = np.floor(v / band) * band + band / 2
+    if leg.get("steps") or band == "stops":
         idx = np.clip(np.searchsorted(xs, v, side="right") - 1, 0, len(xs) - 1)
         rgba[..., :3] = cols[idx].astype(np.uint8)
     else:
         for c in range(3):
             rgba[..., c] = np.interp(v, xs, cols[:, c]).astype(np.uint8)
     fade = FADE[field]
-    top = leg.get("alpha", 215)
+    top = leg.get("alpha", SOLID)
     if fade is None:
         alpha = np.full(values.shape, float(top))
     elif fade[0] == "abs":
-        alpha = np.clip((np.abs(v) - fade[1]) / (fade[2] - fade[1]), 0, 1) * top
+        alpha = np.clip((np.abs(raw) - fade[1]) / (fade[2] - fade[1]), 0, 1) * top
     else:
-        alpha = np.clip((v - fade[0]) / (fade[1] - fade[0]), 0, 1) * top
+        alpha = np.clip((raw - fade[0]) / (fade[1] - fade[0]), 0, 1) * top
     alpha[np.isnan(values)] = 0
     rgba[..., 3] = alpha.astype(np.uint8)
     return rgba
@@ -557,7 +581,7 @@ def k_to_f(k):
 # GFS: the .idx file lists each field with its byte offset.
 GFS_WANT = {
     "t2": "TMP:2 m above ground:", "msl": "PRMSL:mean sea level:", "u10": "UGRD:10 m above ground:",
-    "v10": "VGRD:10 m above ground:", "z500": "HGT:500 mb:", "u250": "UGRD:250 mb:", "v250": "VGRD:250 mb:",
+    "v10": "VGRD:10 m above ground:", "z500": "HGT:500 mb:", "z250": "HGT:250 mb:", "u250": "UGRD:250 mb:", "v250": "VGRD:250 mb:",
     "d2": "DPT:2 m above ground:", "cape": "CAPE:surface:",
     "u500": "UGRD:500 mb:", "v500": "VGRD:500 mb:",
     # Upper-air maps.
@@ -606,7 +630,7 @@ def gfs_fields(run, h):
     out = {
         "t2": (g["t2"] - 273.15) * 9 / 5 + 32, "msl": g["msl"] / 100,
         "w10": np.hypot(g["u10"], g["v10"]) * 2.23694, "z500": g["z500"] / 10,
-        "w250": np.hypot(g["u250"], g["v250"]) * 2.23694,
+        **jet(g, 250),
         "tp6": g["tp6"] / 25.4 if "tp6" in g else None,  # kg/m2 = mm
         "d2": k_to_f(g["d2"]) if "d2" in g else None, "cape": g.get("cape"),
         "qpf": g["tpt"] / 25.4 if "tpt" in g else None,
@@ -631,13 +655,22 @@ def coriolis(ar):
     return (2 * 7.2921e-5 * np.sin(np.radians(ar.lats)))[:, None] * np.ones((1, ar.width))
 
 
+def jet(g, lv):
+    """Wind at one pressure level in knots: speed w<lv> and barbs b<lv>, plus height z<lv> (dam) when there."""
+    u, v = g[f"u{lv}"] * KT, g[f"v{lv}"] * KT
+    out = {f"w{lv}": np.hypot(u, v), f"b{lv}": (u, v)}
+    if f"z{lv}" in g:
+        out[f"z{lv}"] = g[f"z{lv}"] / 10
+    return out
+
+
 def upper_air(g, vort):
     """Upper-air fields in map units: heights in dam, wind in mph, vorticity x1e-5/s, RH %, temperature C."""
     out = {}
     try:
         for lv in (200, 300):
             out[f"z{lv}"] = g[f"z{lv}"] / 10
-            out[f"w{lv}"] = np.hypot(g[f"u{lv}"], g[f"v{lv}"]) * 2.23694
+            out.update(jet(g, lv))
         out["av500"] = vort()
         out["z700"], out["rh700"] = g["z700"] / 10, g["rh700"]
         out["z850"], out["t850"] = g["z850"] / 10, g["t850"] - 273.15
@@ -649,7 +682,7 @@ def upper_air(g, vort):
 
 # ECMWF open data: a JSON-lines .index file with byte offsets.
 EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v", None): "v10",
-           ("gh", "500"): "z500", ("u", "250"): "u250", ("v", "250"): "v250", ("tp", None): "tp",
+           ("gh", "500"): "z500", ("gh", "250"): "z250", ("u", "250"): "u250", ("v", "250"): "v250", ("tp", None): "tp",
            ("2d", None): "d2", ("mucape", None): "cape", ("sf", None): "sf",
            ("gh", "200"): "z200", ("u", "200"): "u200", ("v", "200"): "v200", ("gh", "300"): "z300", ("u", "300"): "u300",
            ("v", "300"): "v300", ("vo", "500"): "vo500", ("gh", "700"): "z700", ("r", "700"): "rh700", ("gh", "850"): "z850",
@@ -734,7 +767,7 @@ def ec_fields(run, h):
     return {
         "t2": (g["t2"] - 273.15) * 9 / 5 + 32, "msl": g["msl"] / 100,
         "w10": np.hypot(g["u10"], g["v10"]) * 2.23694, "z500": g["z500"] / 10,
-        "w250": np.hypot(g["u250"], g["v250"]) * 2.23694, "tp6": tp6,
+        **jet(g, 250), "tp6": tp6,
         "d2": k_to_f(g["d2"]) if "d2" in g else None, "cape": g.get("cape"),
         "qpf": ec_tp(run, h) if h >= 6 else None,
         # Snowfall comes as meters of melted water; 10 inches of snow per inch of water.
@@ -1305,6 +1338,7 @@ def aigfs_fields(run, h):
     }
     pres = {
         "z500": lambda v, lv, f, r: v == "HGT" and lv == "500 mb",
+        "z250": lambda v, lv, f, r: v == "HGT" and lv == "250 mb",
         "u250": lambda v, lv, f, r: v == "UGRD" and lv == "250 mb",
         "v250": lambda v, lv, f, r: v == "VGRD" and lv == "250 mb",
     }
@@ -1319,8 +1353,8 @@ def aigfs_fields(run, h):
 
 
 AIFS_WANT = {("2t", None): "t2", ("2d", None): "d2", ("msl", None): "msl", ("10u", None): "u10", ("10v", None): "v10",
-             ("100u", None): "u100", ("100v", None): "v100", ("gh", "500"): "z500", ("u", "250"): "u250",
-             ("v", "250"): "v250", ("sf", None): "sf"}
+             ("100u", None): "u100", ("100v", None): "v100", ("gh", "500"): "z500", ("gh", "250"): "z250",
+             ("u", "250"): "u250", ("v", "250"): "v250", ("sf", None): "sf"}
 
 
 def aifs_fields(run, h):
@@ -1335,7 +1369,7 @@ def ai_out(g, tp6, qpf):
     """Map fields shared by the two AI models (same units as the GFS maps)."""
     out = {
         "t2": k_to_f(g["t2"]), "msl": g["msl"] / 100, "w10": np.hypot(g["u10"], g["v10"]) * 2.23694,
-        "z500": g["z500"] / 10, "w250": np.hypot(g["u250"], g["v250"]) * 2.23694, "tp6": tp6, "qpf": qpf,
+        "z500": g["z500"] / 10, **jet(g, 250), "tp6": tp6, "qpf": qpf,
         "d2": k_to_f(g["d2"]) if "d2" in g else None,
         "u10kt": g["u10"] * KT, "v10kt": g["v10"] * KT,
     }
@@ -1349,7 +1383,7 @@ def draw_ai(f, h):
     out = {
         "temp": temp_pic(ar, f["t2"]),
         "wind": picture(ar, colorize(f["w10"], "wind")),
-        "upper": picture(ar, colorize(f["w250"], "upper"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.0, True, False)]),
+        "upper": upper_pic(ar, f),
         "mslp": mslp_pic(ar, f["msl"], f["u10kt"], f["v10kt"], 6),
         "precip": rain_pic(ar, f.get("tp6"), "precip", f["msl"]),
         "dew": picture(ar, fill(f.get("d2"), "dew")),
@@ -1537,8 +1571,7 @@ def draw(fields, h):
     out["temp"] = temp_pic(ar, fields["t2"])
     out["precip"] = rain_pic(ar, fields["tp6"], "precip", fields["msl"])
     out["wind"] = picture(ar, colorize(fields["w10"], "wind"))
-    z = smooth(fields["z500"], 3)
-    out["upper"] = picture(ar, colorize(fields["w250"], "upper"), [(z, np.arange(480, 612, 6), "#111827", 1.0, True, False)])
+    out["upper"] = upper_pic(ar, fields)
     out["dew"] = picture(ar, fill(fields.get("d2"), "dew"))
     out["cape"] = picture(ar, fill(fields.get("cape"), "cape"))
     out["qpf"] = picture(ar, fill(fields.get("qpf"), "qpf"))
@@ -1552,6 +1585,17 @@ def draw(fields, h):
 
 
 BARB_GAP = 46  # pixels between wind barbs
+Z250_LEVELS = np.arange(900, 1140, 12)  # 250 mb height lines, dam
+
+
+def upper_pic(ar, f):
+    """Jet stream: 250 mb wind (kt) with barbs and 250 mb height lines (500 mb if a run lacks 250)."""
+    if f.get("z250") is not None:
+        lines = [(smooth(f["z250"], 3), Z250_LEVELS, "#111827", 1.0, True, False)]
+    else:
+        lines = [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.0, True, False)]
+    b = f.get("b250")
+    return picture(ar, colorize(f["w250"], "upper"), lines, barbs=(b[0], b[1], BARB_GAP, "#111827") if b else None)
 
 
 def mslp_pic(ar, msl, u, v, n):
@@ -1564,14 +1608,14 @@ def shear_pic(ar, u, v, legend):
 
 
 def jet_pic(ar, u, v, legend, z=None, zlevels=None):
-    """Jet stream: wind speed colors (mph), barbs (knots) and upper-level divergence lines."""
+    """Jet stream: wind speed colors (kt), barbs (knots) and upper-level divergence lines."""
     # The 3 km HRRR is noisy aloft; smooth to about 100 km so only the jet-scale pattern shows.
     su, sv = smooth(smooth(u, 24), 24), smooth(smooth(v, 24), 24)
     div, _ = kinematics(su / KT, sv / KT, ar)
     lines = [(smooth(div * 1e5, 10), [2, 3, 4, 6, 8], "#7e22ce", 1.0, True, True)]
     if z is not None:
         lines.append((smooth(z, 3), zlevels, "#111827", 1.0, True, False))
-    return picture(ar, colorize(np.hypot(u, v) * 1.15078, legend), lines, barbs=(u, v, BARB_GAP, "#111827"))
+    return picture(ar, colorize(np.hypot(u, v), legend), lines, barbs=(u, v, BARB_GAP, "#111827"))
 
 
 def draw_hrrr_upper(ar, f):
@@ -1602,8 +1646,10 @@ def draw_upper(ar, f):
         return {}
     black = "#111827"
     return {
-        "h200": picture(ar, colorize(f["w200"], "jet200"), [(smooth(f["z200"], 3), np.arange(1080, 1290, 12), black, 1.0, True, False)]),
-        "h300": picture(ar, colorize(f["w300"], "jet300"), [(smooth(f["z300"], 3), np.arange(840, 1000, 12), black, 1.0, True, False)]),
+        "h200": picture(ar, colorize(f["w200"], "jet200"), [(smooth(f["z200"], 3), np.arange(1080, 1290, 12), black, 1.0, True, False)],
+                        barbs=(*f["b200"], BARB_GAP, black)),
+        "h300": picture(ar, colorize(f["w300"], "jet300"), [(smooth(f["z300"], 3), np.arange(840, 1000, 12), black, 1.0, True, False)],
+                        barbs=(*f["b300"], BARB_GAP, black)),
         "h500": picture(ar, colorize(smooth(f["av500"], 2), "vort"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), black, 1.0, True, False)]),
         "h700": picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 3), np.arange(240, 336, 3), black, 0.9, True, False)]),
         "h850": picture(ar, colorize(f["t850"], "t850"), [(smooth(f["t850"], 3), [0], "#1d4ed8", 1.6, False, True),
