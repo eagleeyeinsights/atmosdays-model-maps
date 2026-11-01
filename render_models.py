@@ -129,6 +129,10 @@ LEGENDS = {
         [3.0, "#4c1d95"]], "note": "1 inch (quarter size) and up is severe"},
     "ltng": {"label": "Lightning", "unit": "flashes/km² per 5 min", "stops": [
         [0.05, "#fef9c3"], [0.25, "#fde047"], [0.5, "#f59e0b"], [1, "#ef4444"], [2, "#b91c1c"], [4, "#7e22ce"]]},
+    "wind500": {"label": "500 mb wind (about 18,000 ft): the storm track", "unit": "kt", "stops": [
+        [20, "#e0f2fe"], [30, "#bae6fd"], [40, "#7dd3fc"], [50, "#38bdf8"], [60, "#3b82f6"], [70, "#6366f1"], [80, "#8b5cf6"],
+        [90, "#c026d3"], [100, "#db2777"], [120, "#f43f5e"], [140, "#f59e0b"]],
+        "note": "Lines: 500 mb height, dam. Barbs: wind in knots"},
     "jet200": {"label": "200 mb wind (about 39,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Lines: 200 mb height, dam"},
     "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
@@ -214,7 +218,7 @@ FIELD_NAMES = {
     "dew": "Dew point (humidity)", "cape": "Storm fuel (CAPE)", "qpf": "Total rain since the run started",
     "snow": "Total snowfall", "hail": "Hail size", "ltng": "Lightning",
     "h200": "200 mb: jet stream (39,000 ft)", "h300": "300 mb: jet stream (30,000 ft)", "h500": "500 mb: heights and spin (18,000 ft)",
-    "h700": "700 mb: mid-level moisture (10,000 ft)", "h850": "850 mb: temperature (5,000 ft)",
+    "h500w": "500 mb: heights and wind (18,000 ft)", "h700": "700 mb: mid-level moisture (10,000 ft)", "h850": "850 mb: temperature (5,000 ft)",
     "mlcape": "Storm fuel, mixed layer (MLCAPE)", "cin": "Lid on storms (CIN)", "shear6": "Wind change to 20,000 ft (0-6 km shear)",
     "srh1": "Low-level spin (0-1 km helicity)", "lapse": "Mid-level lapse rate", "pwat": "Water in the air (precipitable water)",
     "stp": "Tornado ingredients (STP)", "scp": "Supercell ingredients (SCP)",
@@ -232,7 +236,7 @@ FIELD_NAMES = {
 }
 # Legend used by each picture.
 FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "heavy": "prob",
-                "h200": "jet200", "h300": "jet300", "h500": "vort", "h700": "rh700", "h850": "t850",
+                "h200": "jet200", "h300": "jet300", "h500": "vort", "h500w": "wind500", "h700": "rh700", "h850": "t850",
                 "jet300": "jet300d", "shear": "shear5",
                 **{k: "prob" for k in ("rain24half", "rain24one", "freeze", "wind25", "pfrzra", "wind34", "fog")},
                 "pop6": "chance", "tstm": "chance", "spread500": "spread", "ice6": "ice"}
@@ -241,7 +245,7 @@ FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "hea
 FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (35, 50), "radar": (4, 6),
         "rain1": (0.005, 0.015), "rain6": (0.005, 0.02), "gust": (10, 20), "uh": (15, 30), "prob": (5, 12),
         "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08),
-        "jet200": (35, 50), "jet300": (35, 50), "vort": (10, 14), "rh700": (60, 75), "t850": None,
+        "jet200": (35, 50), "jet300": (35, 50), "wind500": (15, 22), "vort": (10, 14), "rh700": (60, 75), "t850": None,
         "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
         "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (35, 50), "jet300d": (35, 50), "mslp": None,
         "shear1": (8, 14), "shear5": (15, 25),
@@ -258,7 +262,7 @@ FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (35, 50
 BANDS = {
     "temp": 2, "dew": 2, "t850": 1, "t3h": 1, "td3h": 1,
     "wind": 5, "gust": 5, "wind80": 5, "wind100": 5, "upper": 10, "jet200": 10, "jet250": 10, "jet300": 10,
-    "jet300d": 10, "shear1": 5, "shear5": 5, "shear6": 5,
+    "jet300d": 10, "wind500": 10, "shear1": 5, "shear5": 5, "shear6": 5,
     "cape": 250, "mlcape": 250, "cape3h": 250, "cin": 25, "srh1": 25, "lapse": 0.25, "pwat": 0.1,
     "vort": 2, "rh700": 5, "spread": 5, "sky": 10, "stp": 0.5, "scp": 1, "mslp": 2,
     **{k: "stops" for k in ("precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice", "hail", "ltng", "uh",
@@ -668,6 +672,8 @@ def upper_air(g, vort):
     """Upper-air fields in map units: heights in dam, wind in mph, vorticity x1e-5/s, RH %, temperature C."""
     out = {}
     try:
+        if "u500" in g and "v500" in g:
+            out.update(jet(g, 500))
         for lv in (200, 300):
             out[f"z{lv}"] = g[f"z{lv}"] / 10
             out.update(jet(g, lv))
@@ -1640,6 +1646,12 @@ def draw_hrrr_upper(ar, f):
     return out
 
 
+def h500w_pic(ar, f):
+    """500 mb heights (dam) with wind speed shading and barbs (kt): the classic upper-air map."""
+    z = [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.1, True, False)]
+    return picture(ar, colorize(f["w500"], "wind500"), z, barbs=(*f["b500"], BARB_GAP, "#111827"))
+
+
 def draw_upper(ar, f):
     """The 200, 300, 500, 700 and 850 mb maps (empty if the model run lacks them)."""
     if "z200" not in f:
@@ -1650,6 +1662,7 @@ def draw_upper(ar, f):
                         barbs=(*f["b200"], BARB_GAP, black)),
         "h300": picture(ar, colorize(f["w300"], "jet300"), [(smooth(f["z300"], 3), np.arange(840, 1000, 12), black, 1.0, True, False)],
                         barbs=(*f["b300"], BARB_GAP, black)),
+        **({"h500w": h500w_pic(ar, f)} if "w500" in f else {}),
         "h500": picture(ar, colorize(smooth(f["av500"], 2), "vort"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), black, 1.0, True, False)]),
         "h700": picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 3), np.arange(240, 336, 3), black, 0.9, True, False)]),
         "h850": picture(ar, colorize(f["t850"], "t850"), [(smooth(f["t850"], 3), [0], "#1d4ed8", 1.6, False, True),
@@ -1964,7 +1977,7 @@ def publish(model, manifest):
 
 # ---- main ---------------------------------------------------------------------
 
-UPPER_MAPS = ["h200", "h300", "h500", "h700", "h850"]
+UPPER_MAPS = ["h200", "h300", "h500w", "h500", "h700", "h850"]
 HRRR_MESO = ["mlcape", "cin", "shear6", "shear1", "srh1", "lapse", "pwat", "stp", "scp", "mslp", "t3h", "td3h", "cape3h",
              "jet250", "jet300", "h500", "h700", "h850"]
 
