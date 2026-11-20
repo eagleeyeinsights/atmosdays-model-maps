@@ -109,6 +109,42 @@ def train(a):
     print(json.dumps(model["report"], indent=1))
 
 
+def live(a):
+    """Save today's raw GFS, AI-corrected GFS and ECMWF AIFS at the stations; score what's measured."""
+    import json
+    from ml.live import add_day, scoreboard
+    today = dt.date.today()
+    stations = load_stations(os.path.join(a.data, "stations.json"), today)
+    model = None
+    if os.path.exists(a.model):
+        with open(a.model) as f:
+            model = json.load(f)
+    log = lambda m: print(m, flush=True)  # noqa: E731
+    try:
+        path = add_day(a.data, today, stations, model, log)
+        if path and a.release:
+            upload_release(a.release, path)
+    except Exception as e:  # noqa: BLE001  a bad day must not stop the scoring
+        log(f"live save failed: {e!r}")
+    sb, rebuilt = scoreboard(a.data, stations, today, log)
+    for p in rebuilt:
+        if a.release:
+            upload_release(a.release, p)
+    print(json.dumps(sb, indent=1), flush=True)
+    report = os.path.splitext(a.model)[0] + "-report.json"
+    if os.path.exists(report):
+        with open(report) as f:
+            rep = json.load(f)
+        rep["live"] = sb
+        with open(report, "w") as f:
+            json.dump(rep, f, indent=1)
+        if a.upload and len(os.environ.get("MODELS_UPLOAD_KEY", "")) >= 24:
+            from render_models import send
+            with open(report, "rb") as f:
+                send("PUT", "/weather/models/upload/ml/local-v1-report.json", f.read(), "application/json")
+            log("uploaded the report with the live scoreboard")
+
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -120,8 +156,13 @@ def main():
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--upload", action="store_true")
+    v = sub.add_parser("live")
+    v.add_argument("--data", required=True)
+    v.add_argument("--model", required=True)
+    v.add_argument("--release", default="")
+    v.add_argument("--upload", action="store_true")
     a = p.parse_args()
-    (build if a.cmd == "build" else train)(a)
+    {"build": build, "train": train, "live": live}[a.cmd](a)
 
 
 if __name__ == "__main__":
