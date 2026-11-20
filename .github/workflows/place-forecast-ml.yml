@@ -65,4 +65,10 @@ jobs:
         run: |
           mkdir -p model
           python -m ml.run train --data data --out model/local-v1.json --upload
+      - name: Live scoreboard (save today's GFS, AI-corrected and ECMWF AI forecasts; score past days)
+        env:
+          MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
+          MODELS_SITE: ${{ vars.MODELS_SITE }}
+        run: |
+          python -m ml.run live --data data --model model/local-v1.json --release ml-data --upload
           gh release upload ml-data model/local-v1-report.json --clobber -R "$GITHUB_REPOSITORY"

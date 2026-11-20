@@ -46,6 +46,20 @@ Public repo, so the GitHub minutes are free; NOAA's AWS data is free.
 Locally: `python -m ml.run build --data data --max-minutes 30`, then
 `python -m ml.run train --data data --out model/local-v1.json`.
 
+## Live scoreboard
+
+Held-back years test the model on the past. The live scoreboard (`ml/live.py`,
+last step of the daily run) tests it on forecasts saved before the weather
+happens: each day it saves, at the same stations, the raw GFS forecast, the
+AtmosDays AI-corrected GFS, and ECMWF's AI model (AIFS, open data, CC BY 4.0).
+Once the stations have measured those hours it scores all three on the same
+rows: average miss by days ahead, and next-day temperature week by week. Saved
+forecasts are `live-YYYY-MM.npz` and measured hours `obs-YYYY.npz` in the
+`ml-data` release; the scores go into the report as `live`.
+
+ECMWF's open data only keeps its latest runs, so this also builds an AIFS
+archive at the stations for later training (using AIFS as a model input).
+
 ## What it doesn't do
 
 It doesn't predict tornadoes, hail or hurricanes. It corrects temperature, dew
