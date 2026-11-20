@@ -34,6 +34,12 @@ from render_models import decode, get, idx_spans, ranges_get  # noqa: E402
 REFORECAST = "https://noaa-gefs-retrospective.s3.amazonaws.com/GEFSv12/reforecast"
 GFS = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
 ISD = "https://noaa-global-hourly-pds.s3.amazonaws.com"
+# NOAA retired ISD in late 2025 (its last files are from October 2025) and replaced it
+# with GHCN-hourly, which is updated daily. Years from GHCNH_FROM on are read from it.
+GHCNH = "https://noaa-ghcnh-pds.s3.amazonaws.com/hourly/access/by-year"
+GHCNH_FROM = 2025
+# isd-history.csv stopped updating with ISD, so "still reporting" means into 2025.
+STILL_REPORTING = "20250101"
 ISD_HISTORY = "https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv"
 
 LEADS = list(range(6, 169, 6))
@@ -54,9 +60,9 @@ def load_stations(path, today=None):
     """US airport stations with a long record, thinned to about one per 1-degree box."""
     if os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
-    today = today or dt.date.today()
-    recent = (today - dt.timedelta(days=90)).strftime("%Y%m%d")
+            got = json.load(f)
+        if len(got) >= 100:  # an empty or tiny list is a failed build: make it again
+            return got
     rows = csv.DictReader(io.StringIO(get(ISD_HISTORY).decode("latin-1")))
     best = {}
     for r in rows:
@@ -66,13 +72,15 @@ def load_stations(path, today=None):
             continue
         if r["CTRY"] != "US" or not r["ICAO"].startswith("K") or r["WBAN"] == "99999":
             continue
-        if not (24 <= lat <= 50 and -125 <= lon <= -66) or r["BEGIN"] > "19991231" or r["END"] < recent:
+        if not (24 <= lat <= 50 and -125 <= lon <= -66) or r["BEGIN"] > "19991231" or r["END"] < STILL_REPORTING:
             continue
         box = (math.floor(lat), math.floor(lon))
         s = {"id": r["USAF"] + r["WBAN"], "icao": r["ICAO"], "name": r["STATION NAME"].title(), "lat": lat, "lon": lon, "elev": elev, "begin": r["BEGIN"]}
         if box not in best or s["begin"] < best[box]["begin"]:
             best[box] = s
     out = sorted(best.values(), key=lambda s: s["id"])
+    if len(out) < 100:
+        raise RuntimeError(f"only {len(out)} stations in isd-history.csv; not saving")
     with open(path, "w") as f:
         json.dump(out, f)
     return out
@@ -210,11 +218,53 @@ def isd_hours(text):
     return out
 
 
-def measured_year(stations, year):
-    """{station index: {unix hour: values}} for a year (one small file per station)."""
-    def one(i):
+def ghcnh_hours(text):
+    """{unix hour: (t_f, td_f, ws_mph)} at 00/06/12/18Z from one GHCN-hourly station-year PSV."""
+    out = {}
+    best = {}
+
+    def num(r, field):
+        q = (r.get(f"{field}_Quality_Code") or "").strip()
+        if q in BAD_Q or q.isalpha():  # letters are GHCNh's failed-check flags
+            return None
         try:
-            return i, isd_hours(get(f"{ISD}/{year}/{stations[i]['id']}.csv").decode("utf-8", "replace"))
+            return float(r.get(field) or "")
+        except ValueError:
+            return None
+
+    for r in csv.DictReader(io.StringIO(text), delimiter="|"):
+        try:
+            when = dt.datetime.fromisoformat(r["DATE"]).replace(tzinfo=dt.timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        hour = round(when.timestamp() / 3600)
+        if hour % 6:
+            continue
+        off = abs(when.timestamp() - hour * 3600)
+        if off > 1800 or (hour in best and best[hour] <= off):
+            continue
+        t = num(r, "temperature")
+        if t is None:
+            continue
+        td, ws = num(r, "dew_point_temperature"), num(r, "wind_speed")
+        best[hour] = off
+        out[hour] = (c_to_f(t), None if td is None else c_to_f(td), None if ws is None else ws * 2.23694)
+    return out
+
+
+def ghcnh_id(station):
+    """GHCN-hourly id of an airport station: USW000 + its 5-digit WBAN."""
+    return "USW000" + station["id"][-5:]
+
+
+def measured_year(stations, year):
+    """{station index: {unix hour: values}} for a year (one file per station)."""
+    def one(i):
+        s = stations[i]
+        try:
+            if year >= GHCNH_FROM:
+                return i, ghcnh_hours(get(f"{GHCNH}/{year}/psv/GHCNh_{ghcnh_id(s)}_{year}.psv").decode("utf-8", "replace"))
+            return i, isd_hours(get(f"{ISD}/{year}/{s['id']}.csv").decode("utf-8", "replace"))
         except Exception:  # noqa: BLE001  a station missing a year is fine
             return i, {}
     with cf.ThreadPoolExecutor(max_workers=16) as pool:

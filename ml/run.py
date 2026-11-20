@@ -46,11 +46,19 @@ def built_on(path):
         return dt.date(1970, 1, 1)
 
 
+def rows_in(path):
+    import numpy as np
+    try:
+        return len(np.load(path)["X"])
+    except Exception:  # noqa: BLE001  unreadable: rebuild
+        return 0
+
+
 def todo(data, today):
     out = []
     for name in chunk_names(today):
         path = os.path.join(data, f"{name}.npz")
-        if not os.path.exists(path):
+        if not os.path.exists(path) or rows_in(path) == 0:  # missing, or an empty failed build
             out.append(name)
         elif live(name, today) and (today - built_on(path)).days > FRESH_DAYS:
             out.append(name)
