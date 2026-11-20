@@ -13,7 +13,8 @@ models and official warnings.
 |---|---|---|
 | Old forecasts: GEFS reforecast, control run (same model family as today's GFS) | AWS `noaa-gefs-retrospective` | 2000-2019 |
 | Old forecasts: GFS archive | AWS `noaa-gfs-bdp-pds` | 2021 to now |
-| What really happened: hourly airport weather (ISD) | AWS `noaa-global-hourly-pds` | same years |
+| What really happened: hourly airport weather (ISD) | AWS `noaa-global-hourly-pds` | 2000-2024 |
+| What really happened, newer: GHCN-hourly (replaced ISD in late 2025, updated daily) | AWS `noaa-ghcnh-pds` | 2025 to now |
 | Station list | NOAA NCEI `isd-history.csv` | |
 
 Every 5th day, 00Z run, 6 to 168 hours ahead every 6 hours, at about one long-record
