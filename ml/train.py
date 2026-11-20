@@ -83,7 +83,14 @@ def export(booster):
 
 
 def predict_exported(trees, X):
-    """Same walk the website does (used here to check the export matches LightGBM)."""
+    """Same walk the website does (used here to check the export matches LightGBM).
+
+    Compare in float64, as LightGBM and the website (JavaScript numbers) do. The
+    training rows are float32; comparing a float32 value with a threshold makes
+    numpy round the threshold to float32 too, and a station's exact latitude,
+    longitude or height can then land on the wrong side of a split.
+    """
+    X = np.asarray(X, dtype=np.float64)
     y = np.zeros(len(X))
     for tr in trees:
         for r in range(len(X)):
