@@ -34,6 +34,7 @@ COLS = ["station", "valid", "gfs_lead", "gfs_t", "gfs_td", "gfs_ws", "ai_t", "ai
         "aifs_lead", "aifs_t", "aifs_td", "aifs_ws"]
 C = {k: i for i, k in enumerate(COLS)}
 SRCS = ["gfs", "ai", "aifs"]
+ECMWF_CREDIT = "Contains ECMWF AIFS data, © ECMWF, CC BY 4.0 (changed: read at stations and scored)."
 AIFS_WANT = {"2t": "t", "2d": "td", "10u": "u", "10v": "v"}
 OBS_FRESH_DAYS = 2
 
@@ -235,5 +236,7 @@ def scoreboard(data, stations, today, log=print):
     sb = score(L, obs)
     days = [str(d) for f in files for d in np.load(f)["days"]]
     sb.update({"updated": today.isoformat(), "since": min(days), "daysSaved": len(days), "stations": len(stations),
-               "sources": {"gfs": "NOAA GFS, raw", "ai": "AtmosDays AI-corrected GFS", "aifs": "ECMWF AIFS (AI model), raw"}})
+               "sources": {"gfs": "NOAA GFS, raw", "ai": "AtmosDays AI-corrected GFS", "aifs": "ECMWF AIFS (AI model), raw"},
+               # CC BY 4.0: anything that shows the AIFS numbers must show this line.
+               "credit": ECMWF_CREDIT})
     return sb, rebuilt

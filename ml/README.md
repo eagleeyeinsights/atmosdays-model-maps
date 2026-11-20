@@ -60,6 +60,13 @@ forecasts are `live-YYYY-MM.npz` and measured hours `obs-YYYY.npz` in the
 ECMWF's open data only keeps its latest runs, so this also builds an AIFS
 archive at the stations for later training (using AIFS as a model input).
 
+The scoreboard carries a `credit` line ("Contains ECMWF AIFS data, © ECMWF,
+CC BY 4.0"); anything that shows the AIFS numbers, or a forecast that learned
+from them, must show it too.
+
+Owner's rule: Gemini or any other Google AI product must not be used to build,
+train or write these forecasts or models.
+
 ## What it doesn't do
 
 It doesn't predict tornadoes, hail or hurricanes. It corrects temperature, dew
