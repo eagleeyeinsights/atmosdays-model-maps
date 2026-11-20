@@ -46,6 +46,18 @@ can use GitHub's free minutes for public repositories.
 
 ECMWF and AIFS maps are drawn from ECMWF open data, licensed CC BY 4.0
 (Copyright ECMWF; based on data and products of ECMWF). NOAA data is public domain.
+Anywhere ECMWF or AIFS maps or numbers are shown (the model maps, the live
+scoreboard in `ml/`, the website and the iPhone app), a visible credit goes
+with them: "Contains ECMWF AIFS data, © ECMWF, CC BY 4.0" (or "ECMWF data" for
+the regular ECMWF model), plus a line on the website's Sources page.
+
+## Owner's rule: no Gemini or Google AI
+
+Gemini or any other Google AI product must not be used to build, train, tune or
+write the forecasts or models in this repo. (Reading free public data that
+happens to be hosted on Google Cloud, like the ECMWF open-data mirror, is fine;
+NOAA's AI GFS is NOAA's own model output, used as data only.)
+
 NBM files store every other row right to left; `decode()` turns those rows around.
 
 Run by hand: Actions → Weather model maps → Run workflow (tick "test_only" to
