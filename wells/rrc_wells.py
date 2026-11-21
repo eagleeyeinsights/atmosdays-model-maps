@@ -345,6 +345,7 @@ def build(counties, out_dir=None, upload=False, workers=4):
     ad.list()
     print(f"RRC lists: {len(wl.files)} well layer files, {len(ad.files)} API data files", flush=True)
     operators: dict[str, dict[str, int]] = {}
+    leases: dict[tuple, int] = {}  # (lease, fips, operator) -> active wells, for the name search
     summary = {}
 
     def one(fips):
@@ -369,8 +370,11 @@ def build(counties, out_dir=None, upload=False, workers=4):
                 if w[5] >= 0 and w[3] != "plugged":
                     by = operators.setdefault(data["ops"][w[5]], {})
                     by[fips] = by.get(fips, 0) + 1
+                if w[6] and w[3] not in ("plugged", "canceled", "dry"):
+                    k = (w[6], fips, data["ops"][w[5]] if w[5] >= 0 else "")
+                    leases[k] = leases.get(k, 0) + 1
             print(f"  {fips} {data['county']}: {len(data['wells'])} wells, {n_loc} with a surface spot, {size / 1e6:.1f} MB", flush=True)
-    return updated, summary, operators
+    return updated, summary, operators, leases
 
 
 def put(key, body, out_dir, upload):
@@ -430,7 +434,7 @@ def main(argv=None):
     full = len(counties) == len(FIPS)
     # Counties are uploaded as they finish; the manifest and operator list go last,
     # and only after the checks pass, so a broken RRC download never replaces a good index.
-    updated, summary, operators = build(counties, args.out, False if not full else args.upload)
+    updated, summary, operators, leases = build(counties, args.out, False if not full else args.upload)
     total = sum(s["wells"] for s in summary.values())
     print(f"{len(summary)} counties, {total} wells", flush=True)
     if full:
@@ -441,10 +445,15 @@ def main(argv=None):
         if before and abs(total - before) > 0.1 * before:
             raise SystemExit(f"well count moved from {before} to {total} (over 10%); keeping the old index")
     op_list = {"v": 1, "updated": updated, "operators": sorted(([name, sorted(by.items())] for name, by in operators.items()), key=lambda x: x[0])}
+    op_names = sorted({k[2] for k in leases})
+    op_at = {n: i for i, n in enumerate(op_names)}
+    lease_list = {"v": 1, "updated": updated, "cols": ["lease", "fips", "op", "wells"], "ops": op_names,
+                  "leases": sorted([lease, fips, op_at[op], n] for (lease, fips, op), n in leases.items())}
     manifest = {"v": 1, "state": "TX", "updated": updated, "wells": total, "counties": summary,
                 "source": "Railroad Commission of Texas: Well Layers by County and Statewide API Data (free public downloads). Not an official record."}
     up = args.upload and full
     put("wells/tx/operators.json", json.dumps(op_list, separators=(",", ":")).encode(), args.out, up)
+    put("wells/tx/leases.json", json.dumps(lease_list, separators=(",", ":")).encode(), args.out, up)
     put("wells/tx/manifest.json", json.dumps(manifest, separators=(",", ":")).encode(), args.out, up)
     if args.upload and not full:
         print("A partial run uploads nothing (use --out to look at the files).")
