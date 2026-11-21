@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       test_only:
-        description: 'Test: build 3 counties and keep them as a download, upload nothing'
+        description: 'Test: build 5 counties and keep them as a download, upload nothing'
         type: boolean
         default: false
 
@@ -45,9 +45,9 @@ jobs:
           MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
           MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
         run: python wells/rrc_wells.py --upload
-      - name: Test build (Reeves, Loving, Karnes; nothing uploaded)
+      - name: Test build (Anderson, Karnes, Loving, Reeves, Zavala; nothing uploaded)
         if: ${{ inputs.test_only }}
-        run: python wells/rrc_wells.py --out out --counties 389,301,255
+        run: python wells/rrc_wells.py --out out --counties 001,255,301,389,507
       - uses: actions/upload-artifact@v4
         if: ${{ inputs.test_only }}
         with:

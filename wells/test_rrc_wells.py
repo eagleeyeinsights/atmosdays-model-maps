@@ -7,6 +7,7 @@ import http.server
 import io
 import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -78,6 +79,12 @@ def page(names, first):
 
 class Fake(http.server.BaseHTTPRequestHandler):
     per_page = 1  # tiny pages so the AJAX paging is exercised
+    pages: dict = {}  # session -> first row of the table page it shows; like the real site, only those rows can be clicked
+    sessions = iter(range(1, 10 ** 6))
+
+    def session(self):
+        m = re.search(r"JSESSIONID=(\w+)", self.headers.get("Cookie", ""))
+        return m.group(1) if m else ""
 
     def log_message(self, *a):
         pass
@@ -87,12 +94,15 @@ class Fake(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         names = self.names()
+        sid = self.session() or f"s{next(Fake.sessions)}"
+        Fake.pages[sid] = 0
         body = (f'<html><body><form id="fileList" name="fileList" method="post" action="/webclient/godrive/PublicGoDrive.xhtml">'
                 f'<input type="hidden" name="fileList_SUBMIT" value="1"><select name="fileTable_rppDD"><option value="250" selected>250</option></select>'
                 f'<table>{page(names[:self.per_page], 0)}</table><input type="hidden" name="javax.faces.ViewState" value="vs-1"></form>'
                 f'<span>Showing 1 - {self.per_page} of {len(names)}</span></body></html>').encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
+        self.send_header("Set-Cookie", f"JSESSIONID={sid}; Path=/")
         self.end_headers()
         self.wfile.write(body)
 
@@ -100,7 +110,7 @@ class Fake(http.server.BaseHTTPRequestHandler):
         form = dict(urllib.parse.parse_qsl(self.rfile.read(int(self.headers["Content-Length"])).decode()))
         names = self.names()
         if form.get("javax.faces.partial.ajax"):
-            first = int(form["fileTable_first"])
+            first = Fake.pages[self.session()] = int(form["fileTable_first"])
             body = f'<?xml version="1.0"?><partial-response><changes><update id="fileTable"><![CDATA[{page(names[first:first + self.per_page], first)}]]></update><update id="j_id__v_0:javax.faces.ViewState:1"><![CDATA[vs-2]]></update></changes></partial-response>'
             self.send_response(200)
             self.send_header("Content-Type", "text/xml")
@@ -109,7 +119,16 @@ class Fake(http.server.BaseHTTPRequestHandler):
             return
         assert form.get("fileList_SUBMIT") == "1" and form.get("javax.faces.ViewState", "").startswith("vs-"), form
         key = next(k for k in form if k.startswith("fileTable:") and k.endswith(":j_id_2f"))
-        name = names[int(key.split(":")[1])]
+        row = int(key.split(":")[1])
+        first = Fake.pages[self.session()]
+        if not first <= row < first + self.per_page:
+            # The real site ignores a click on a row that isn't on the page shown and sends the page back.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<html><body>file list</body></html>")
+            return
+        name = names[row]
         self.send_response(200)
         self.send_header("Content-Type", "application/force-download")
         self.end_headers()
@@ -148,6 +167,9 @@ class WellIndexTest(unittest.TestCase):
         self.assertEqual(sorted(files), sorted(FILES))
         self.assertEqual(files["well389.zip"]["row"], 3)
         self.assertTrue(g.get("well389.zip").startswith(b"PK"))
+        # Rows off the page now shown: the table is paged back to them first.
+        self.assertEqual(g.get("api301.dbf"), FILES["api301.dbf"])
+        self.assertTrue(g.get("well301.zip").startswith(b"PK"))
 
     def test_build_joins_points_and_operators(self):
         with tempfile.TemporaryDirectory() as d:

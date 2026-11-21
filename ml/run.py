@@ -31,7 +31,7 @@ def chunk_names(today):
     return names
 
 
-def live(name, today):
+def is_live(name, today):
     """Chunks still collecting days: this year's GFS, and last year's for the first weeks of January."""
     src, year = name.split("-")
     return src == "gfs" and (int(year) == today.year or (int(year) == today.year - 1 and today.timetuple().tm_yday <= 15))
@@ -60,10 +60,10 @@ def todo(data, today):
         path = os.path.join(data, f"{name}.npz")
         if not os.path.exists(path) or rows_in(path) == 0:  # missing, or an empty failed build
             out.append(name)
-        elif live(name, today) and (today - built_on(path)).days > FRESH_DAYS:
+        elif is_live(name, today) and (today - built_on(path)).days > FRESH_DAYS:
             out.append(name)
     # The live chunk first (keeps learning), then history oldest first.
-    return sorted(out, key=lambda n: (not live(n, today), n))
+    return sorted(out, key=lambda n: (not is_live(n, today), n))
 
 
 def upload_release(tag, path):
