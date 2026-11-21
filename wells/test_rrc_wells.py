@@ -177,6 +177,7 @@ class WellIndexTest(unittest.TestCase):
             reeves = json.load(open(os.path.join(d, "wells/tx/389.json")))
             ops = json.load(open(os.path.join(d, "wells/tx/operators.json")))
             man = json.load(open(os.path.join(d, "wells/tx/manifest.json")))
+            leases = json.load(open(os.path.join(d, "wells/tx/leases.json")))
         self.assertEqual(reeves["county"], "Reeves")
         by = {w[0]: w for w in reeves["wells"]}
         self.assertEqual(set(by), {"36724", "00001", "00003", "99999"})
@@ -192,6 +193,11 @@ class WellIndexTest(unittest.TestCase):
         op = dict((n, dict(c)) for n, c in ops["operators"])
         self.assertEqual(op["PERMIAN ROCK OPERATING LLC"], {"301": 1, "389": 2})
         self.assertNotIn("OLD WELLS INC", op)  # plugged wells don't count
+        # Lease name search list: active wells only, with county and operator.
+        named = {(l, f, leases["ops"][o]): n for l, f, o, n in leases["leases"]}
+        self.assertEqual(named[("RAYBURN 12", "389", "PERMIAN ROCK OPERATING LLC")], 2)  # 1H and 2H (2H has no surface spot yet)
+        self.assertFalse(any(k[2] == "OLD WELLS INC" for k in named))
+        self.assertEqual(leases["leases"], sorted(leases["leases"]))
         self.assertEqual(man["wells"], 5)
         self.assertEqual(man["counties"]["389"]["located"], 3)
 
