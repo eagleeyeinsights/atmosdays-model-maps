@@ -38,6 +38,7 @@ import io
 import json
 import os
 import re
+import ssl
 import struct
 import sys
 import threading
@@ -161,7 +162,13 @@ class GoDrive:
         self.link = link
         self.page_rows = page_rows
         self.jar = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+        cookies = urllib.request.HTTPCookieProcessor(self.jar)
+        self.opener = urllib.request.build_opener(cookies)
+        # A second way to connect, used after a dropped handshake: TLS 1.2 only, which
+        # sends the server a different greeting. Both share the same cookies (session).
+        tls12 = ssl.create_default_context()
+        tls12.maximum_version = ssl.TLSVersion.TLSv1_2
+        self.alt_opener = urllib.request.build_opener(cookies, urllib.request.HTTPSHandler(context=tls12))
         self.action = f"{MFT}/webclient/godrive/PublicGoDrive.xhtml"
         self.fields: dict[str, str] = {}
         self.files: dict[str, dict] = {}
@@ -172,18 +179,22 @@ class GoDrive:
     def _open(self, url, data=None, headers=None, timeout=180):
         req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, **(headers or {})})
         last = None
+        opener = self.opener
         for wait in (*RETRY_WAITS, None):
             gap = self.last_request + MIN_GAP - time.monotonic()
             if gap > 0:
                 time.sleep(gap)
             self.last_request = time.monotonic()
             try:
-                with self.opener.open(req, timeout=timeout) as r:
+                with opener.open(req, timeout=timeout) as r:
                     return r.read(), dict(r.headers)
             except urllib.error.HTTPError:
                 raise  # the server answered; retrying the same stale request won't help
             except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
                 last = e
+                if "SSL" in str(e) or isinstance(getattr(e, "reason", e), ssl.SSLError):
+                    # The server hung up during the handshake: switch to the other way of connecting.
+                    opener = self.alt_opener if opener is self.opener else self.opener
                 if wait is None:
                     break
                 print(f"  RRC connection problem ({e}); trying again in {wait} s", flush=True)
@@ -456,15 +467,19 @@ def site_index_age_days():
         return None
 
 
-def source_down(why: str, upload: bool) -> int:
-    """The RRC site is down. The website keeps the index it has. Only a stale or missing
-    index makes the run fail, so a short outage on their side doesn't raise an alarm."""
+def source_down(why: str, upload: bool, last_try: bool = True) -> int:
+    """The RRC site is down. The website keeps the index it has. The run fails only when
+    the index is stale, or when there is none and this is the day's last try, so a short
+    outage on their side doesn't raise an alarm. A later try runs on a new GitHub computer."""
     age = site_index_age_days() if upload else None
     if age is not None and age <= STALE_DAYS:
-        print(f"::warning::Skipped today: {why}. The website keeps its index from {age:.1f} days ago; the next daily run tries again.")
+        print(f"::warning::Skipped this try: {why}. The website keeps its index from {age:.1f} days ago; a later run tries again.")
+        return 0
+    if age is None and not last_try:
+        print(f"::warning::Skipped this try: {why}. The website has no well index yet; a later run today tries again.")
         return 0
     have = "has no well index yet" if age is None else f"index is {age:.0f} days old"
-    print(f"::error::{why}. The website {have}; the next daily run tries again.")
+    print(f"::error::{why}. The website {have}; tomorrow's runs try again.")
     return 1
 
 
@@ -473,10 +488,19 @@ def main(argv=None):
     a.add_argument("--out", help="also write the files to this folder")
     a.add_argument("--upload", action="store_true", help="upload to the website (needs MODELS_UPLOAD_KEY)")
     a.add_argument("--counties", default="", help="comma list of county FIPS codes (default: all 254)")
+    a.add_argument("--skip-if-fresh", type=float, default=0, metavar="HOURS",
+                   help="with --upload: do nothing if the website's index is newer than this")
+    a.add_argument("--not-last-try", action="store_true",
+                   help="another run comes later today, so an RRC outage with no index yet is only a warning")
     args = a.parse_args(argv)
     if args.upload and len(os.environ.get("MODELS_UPLOAD_KEY", "")) < 24:
         print("MODELS_UPLOAD_KEY is not set; nothing to do.")
         return 0
+    if args.upload and args.skip_if_fresh:
+        age = site_index_age_days()
+        if age is not None and age * 24 < args.skip_if_fresh:
+            print(f"The website's well index is {age * 24:.1f} hours old; nothing to do this time.")
+            return 0
     counties = [c.strip().zfill(3) for c in args.counties.split(",") if c.strip()] or list(FIPS)
     bad = [c for c in counties if c not in FIPS]
     if bad:
@@ -487,7 +511,7 @@ def main(argv=None):
     try:
         updated, summary, operators, leases = build(counties, args.out, False if not full else args.upload)
     except SourceUnreachable as e:
-        return source_down(str(e), args.upload)
+        return source_down(str(e), args.upload, last_try=not args.not_last_try)
     total = sum(s["wells"] for s in summary.values())
     print(f"{len(summary)} counties, {total} wells", flush=True)
     if full:
