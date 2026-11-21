@@ -1743,11 +1743,21 @@ SND_SCALE = {
 HRRR_SND_LEVELS = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 725, 700, 650, 600, 550, 500, 450,
                    400, 350, 300, 250, 200, 150, 100]
 GFS_SND_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 200, 150, 100]
+EC_SND_LEVELS = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100]
 SND = {
     "hrrr": {"grid": {"west": -126.0, "south": 21.5, "step": 0.125, "nx": 480, "ny": 233},
              "levels": HRRR_SND_LEVELS, "hours": list(range(0, 19)) + list(range(21, 49, 3)), "dew": "DPT"},
     "gfs": {"grid": {"west": -135.0, "south": 15.0, "step": 0.25, "nx": 321, "ny": 181},
             "levels": GFS_SND_LEVELS, "hours": list(range(0, 241, 6)), "dew": "RH"},
+    # RRFS: NOAA's new 3 km model (taking over from the RAP and NAM). Levels come from
+    # its pressure-level file, ground values from its 2-D file; every 3 hours to
+    # 2 days, then every 6 hours to 3.5 days.
+    "rrfs": {"grid": {"west": -126.0, "south": 21.5, "step": 0.125, "nx": 480, "ny": 233},
+             "levels": GFS_SND_LEVELS, "hours": list(range(0, 49, 3)) + list(range(54, 85, 6)), "dew": "DPT"},
+    # ECMWF open data (CC BY 4.0): 12 pressure levels. The open files have no ground
+    # height, so it is worked out from the ground pressure and the level heights.
+    "ecmwf": {"grid": {"west": -135.0, "south": 15.0, "step": 0.25, "nx": 321, "ny": 181},
+              "levels": EC_SND_LEVELS, "hours": list(range(0, 241, 6)), "dew": "RH", "src": "ecmwf"},
 }
 
 
@@ -1762,9 +1772,13 @@ def snd_info(model):
             "bytes": 6 + 5 * len(spec["levels"]), "missing": 255}
 
 
-def snd_url(model, run, h):
+def snd_url(model, run, h, part="levels"):
+    """The NOAA file with a model's pressure levels (part "levels") or its ground values ("ground")."""
     if model == "hrrr":
         return f"{HRRR}/hrrr.{run[:8]}/conus/hrrr.t{run[8:]}z.wrfprsf{h:02d}.grib2"
+    if model == "rrfs":
+        kind = "prslev" if part == "levels" else "2dfld"
+        return f"{RRFS_OPS}/rrfs.{run[:8]}/{run[8:]}/rrfs.t{run[8:]}z.{kind}.3km.f{h:03d}.conus.grib2"
     return gfs_url(run, h)
 
 
@@ -1816,12 +1830,11 @@ def dew_from_rh(t_c, rh):
     return 243.04 * a / (17.625 - a)
 
 
-def snd_hour(model, run, h, sampler):
-    """The packed sounding grid for one forecast hour (bytes)."""
+def snd_grids_noaa(model, run, h):
+    """Decoded fields for one hour from NOAA files (.idx byte ranges). Each field is
+    fetched when first used, so only a few are held in memory at a time."""
     spec = SND[model]
-    levels, dew = spec["levels"], spec["dew"]
-    lv = {f"{p} mb": p for p in levels}
-    want = {
+    ground = {
         "ps": lambda v, l, f, r: v == "PRES" and l == "surface",
         "zs": lambda v, l, f, r: v == "HGT" and l == "surface",
         "t2": lambda v, l, f, r: v == "TMP" and l == "2 m above ground",
@@ -1829,14 +1842,69 @@ def snd_hour(model, run, h, sampler):
         "u10": lambda v, l, f, r: v == "UGRD" and l == "10 m above ground",
         "v10": lambda v, l, f, r: v == "VGRD" and l == "10 m above ground",
     }
-    for name, var in (("z", "HGT"), ("t", "TMP"), ("d", dew), ("u", "UGRD"), ("v", "VGRD")):
-        for lvl, p in lv.items():
-            want[f"{name}{p}"] = (lambda var, lvl: lambda v, l, f, r: v == var and l == lvl)(var, lvl)
-    url = snd_url(model, run, h)
-    spans = idx_spans(get(url + ".idx").decode(), want)
-    missing = [k for k in want if k not in spans]
+    levels = {}
+    for name, var in (("z", "HGT"), ("t", "TMP"), ("d", spec["dew"]), ("u", "UGRD"), ("v", "VGRD")):
+        for p in spec["levels"]:
+            levels[f"{name}{p}"] = (lambda var, lvl: lambda v, l, f, r: v == var and l == lvl)(var, f"{p} mb")
+    lv_url, gr_url = snd_url(model, run, h, "levels"), snd_url(model, run, h, "ground")
+    parts = [(lv_url, {**levels, **ground})] if gr_url == lv_url else [(lv_url, levels), (gr_url, ground)]
+    where = {}
+    for url, want in parts:
+        spans = idx_spans(get(url + ".idx").decode(), want)
+        missing = [k for k in want if k not in spans]
+        if missing:
+            raise RuntimeError(f"{model} +{h}h missing {missing[:5]}")
+        for k in want:
+            where[k] = (url, spans[k])
+    return lambda k: decode(get(where[k][0], {"Range": f"bytes={where[k][1][0]}-{where[k][1][1]}"}))
+
+
+def snd_grids_ecmwf(run, h):
+    """The same fields from ECMWF open data (.index JSON byte ranges). There is no ground height ("zs")."""
+    spec = SND["ecmwf"]
+    want = {("sp", None): "ps", ("2t", None): "t2", ("2d", None): "d2", ("10u", None): "u10", ("10v", None): "v10"}
+    for name, par in (("z", "gh"), ("t", "t"), ("d", "r"), ("u", "u"), ("v", "v")):
+        for p in spec["levels"]:
+            want[(par, str(p))] = f"{name}{p}"
+    path = ec_url(run, h)
+    idx = [json.loads(x) for x in ec_get(path + ".index").decode().splitlines() if x.strip()]
+    spans = {}
+    for r in idx:
+        name = want.get((r["param"], r.get("levelist")))
+        if name and name not in spans:
+            spans[name] = (r["_offset"], r["_offset"] + r["_length"] - 1)
+    missing = [k for k in want.values() if k not in spans]
     if missing:
-        raise RuntimeError(f"{model} +{h}h missing {missing[:5]}")
+        raise RuntimeError(f"ecmwf +{h}h missing {missing[:5]}")
+    raw = ranges_get(path + ".grib2", spans, fetch=ec_get)
+
+    def grid(k):
+        if k not in raw:
+            raise KeyError(k)
+        return decode(raw[k])
+    return grid
+
+
+def ground_height(ps, levels, z_levels):
+    """Ground height (m) from the ground pressure (mb) and the heights of the pressure
+    levels (bottom up), by interpolating in log pressure. Below the lowest level it
+    extends the slope of the lowest two."""
+    lp = np.log(np.asarray(levels, dtype=float))
+    lps = np.log(np.clip(ps, 1, None))
+    out = np.full(ps.shape, np.nan)
+    for i in range(len(levels) - 1):
+        lo, hi = lp[i], lp[i + 1]
+        inside = (lps >= hi) & ((lps <= lo) if i else True)
+        f = (lps - lo) / (hi - lo)
+        out = np.where(inside & np.isnan(out), z_levels[i] + f * (z_levels[i + 1] - z_levels[i]), out)
+    return out
+
+
+def snd_hour(model, run, h, sampler):
+    """The packed sounding grid for one forecast hour (bytes)."""
+    spec = SND[model]
+    levels, dew = spec["levels"], spec["dew"]
+    grid = snd_grids_ecmwf(run, h) if spec.get("src") == "ecmwf" else snd_grids_noaa(model, run, h)
     info = snd_info(model)
     ny, nx = spec["grid"]["ny"], spec["grid"]["nx"]
     out = np.full((ny, nx, info["bytes"]), 255, dtype=np.uint8)
@@ -1846,14 +1914,16 @@ def snd_hour(model, run, h, sampler):
         ok = np.isfinite(q)
         out[:, :, i] = np.where(ok, np.clip(np.nan_to_num(q), 0, 254), 255).astype(np.uint8)
 
-    def grid(k):
-        return decode(get(url, {"Range": f"bytes={spans[k][0]}-{spans[k][1]}"}))
-
     sc = SND_SCALE
     t2 = sampler.sample(grid("t2")) - 273.15
     d2 = sampler.sample(grid("d2")) - 273.15
-    put(0, sampler.sample(grid("ps")) / 100, *sc["ps"])
-    put(1, sampler.sample(grid("zs")), *sc["zs"])
+    ps = sampler.sample(grid("ps")) / 100
+    if spec.get("src") == "ecmwf":
+        zs = ground_height(ps, levels, [sampler.sample(grid(f"z{p}")) for p in levels])
+    else:
+        zs = sampler.sample(grid("zs"))
+    put(0, ps, *sc["ps"])
+    put(1, zs, *sc["zs"])
     put(2, t2, *sc["t2"])
     put(3, np.maximum(t2 - d2, 0), *sc["dd"])
     u, v = sampler.wind(grid("u10"), grid("v10"))
@@ -1873,6 +1943,23 @@ def snd_hour(model, run, h, sampler):
     return out.tobytes()
 
 
+def snd_check(model, data, lat=32.9, lon=-97.0):
+    """One spot (Dallas-Fort Worth) read back from the packed bytes, for the job log."""
+    info = snd_info(model)
+    row, col = round((lat - info["south"]) / info["step"]), round((lon - info["west"]) / info["step"])
+    b = np.frombuffer(data, np.uint8).reshape(info["ny"], info["nx"], info["bytes"])[row, col]
+    sc = info["scale"]
+    val = lambda i, k: None if b[i] == 255 else round(sc[k][0] + int(b[i]) * sc[k][1], 1)  # noqa: E731
+    out = [f"ground {val(0, 'ps')} mb {val(1, 'zs')} m {val(2, 't2')} C"]
+    for li, p in enumerate(info["levels"]):
+        if p in (850, 500, 250):
+            o = 6 + 5 * li
+            z = None if b[o] == 255 else info["zbase"][li] + int(b[o]) * info["zstep"]
+            t = None if b[o + 1] == 255 else round(info["tbase"][li] + int(b[o + 1]) * info["tstep"], 1)
+            out.append(f"{p} mb {z} m {t} C wind {val(o + 3, 'uv')},{val(o + 4, 'uv')} m/s")
+    return "; ".join(out)
+
+
 def render_soundings(model, run, out_dir, upload, pick=None):
     """Packs and uploads every hour; returns the manifest entry, or None if no hour worked."""
     spec = SND[model]
@@ -1883,6 +1970,8 @@ def render_soundings(model, run, out_dir, upload, pick=None):
 
     def one(h):
         data = snd_hour(model, run, h, sampler)
+        if h == hours[0]:
+            print(f"  {model} +{h}h check: {snd_check(model, data)}", flush=True)
         key = f"{model}/{run}/snd/{h:03d}.bin"
         if out_dir:
             p = os.path.join(out_dir, key)
