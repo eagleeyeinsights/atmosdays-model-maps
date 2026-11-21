@@ -66,7 +66,13 @@ def export_tree(node, out):
         return i
     out["f"][i] = int(node["split_feature"])
     out["t"][i] = float(node["threshold"])
-    out["n"][i] = 1 if node.get("default_left", True) else 0
+    # Where a missing value goes. LightGBM only sends NaN the "default" way when the
+    # feature had NaN while it was binned (missing_type "NaN"); otherwise (missing_type
+    # "None") a NaN is read as 0 and compared like any number.
+    if node.get("missing_type", "None") == "None":
+        out["n"][i] = 1 if 0.0 <= out["t"][i] else 0
+    else:
+        out["n"][i] = 1 if node.get("default_left", True) else 0
     out["l"][i] = export_tree(node["left_child"], out)
     out["r"][i] = export_tree(node["right_child"], out)
     return i
