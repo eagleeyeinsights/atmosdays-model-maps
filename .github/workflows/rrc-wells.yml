@@ -10,7 +10,13 @@ name: Texas well index (Railroad Commission)
 # Only the schedule and the owner's "Run workflow" button start this job.
 on:
   schedule:
-    - cron: '35 9 * * *'   # 3:35 or 4:35 AM Central, after the RRC's evening refresh
+    # Four tries a day, each on a new GitHub computer. The RRC file site sometimes
+    # hangs up on GitHub's computers for a while; a later try usually gets through.
+    # A try does nothing once the day's index is built.
+    - cron: '35 9 * * *'    # 3:35 or 4:35 AM Central, after the RRC's evening refresh
+    - cron: '35 13 * * *'
+    - cron: '35 17 * * *'
+    - cron: '35 21 * * *'   # the day's last try: fails if there is still no index
   workflow_dispatch:
     inputs:
       test_only:
@@ -44,7 +50,10 @@ jobs:
         env:
           MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
           MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
-        run: python wells/rrc_wells.py --upload
+          # Scheduled tries skip once today's index is built. Only the last one may fail
+          # because the website has no index yet; a stale index always fails.
+          EXTRA: ${{ github.event_name == 'schedule' && format('--skip-if-fresh 20{0}', github.event.schedule != '35 21 * * *' && ' --not-last-try' || '') || '' }}
+        run: python wells/rrc_wells.py --upload $EXTRA
       - name: Test build (Anderson, Karnes, Loving, Reeves, Zavala; nothing uploaded)
         if: ${{ inputs.test_only }}
         run: python wells/rrc_wells.py --out out --counties 001,255,301,389,507
