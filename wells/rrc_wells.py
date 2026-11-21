@@ -50,6 +50,17 @@ import zipfile
 MFT = "https://mft.rrc.texas.gov"
 WELL_LAYERS = f"{MFT}/link/d551fb20-442e-4b67-84fa-ac3f23ecabb4"  # Well Layers by County (shapefiles)
 API_DBF = f"{MFT}/link/1eb94d66-461d-4114-93f7-b4bc04a70674"  # Statewide API Data (dBase)
+# A dropped connection (the RRC site sometimes cuts the secure handshake for minutes
+# at a time) is waited out with growing pauses, about 8 minutes in all, before a
+# request counts as failed. Requests are also spaced out so the job stays polite.
+RETRY_WAITS = (10, 30, 60, 120, 240)
+MIN_GAP = 0.5  # seconds between requests to one RRC folder
+
+
+class SourceUnreachable(Exception):
+    """The RRC file site could not be reached at all (not a problem in this code)."""
+
+
 UA = "AtmosDays-WellIndex/1.0 (+https://atmosdays.eagleeyeinsightsllc.com/about)"
 
 # Texas county FIPS codes are assigned in alphabetical order: 001, 003, ... 507.
@@ -156,19 +167,27 @@ class GoDrive:
         self.files: dict[str, dict] = {}
         self.shown: set[int] = set()  # table rows on the page the server is showing
         self.lock = threading.Lock()
+        self.last_request = 0.0
 
     def _open(self, url, data=None, headers=None, timeout=180):
         req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, **(headers or {})})
         last = None
-        for i in range(5):
+        for wait in (*RETRY_WAITS, None):
+            gap = self.last_request + MIN_GAP - time.monotonic()
+            if gap > 0:
+                time.sleep(gap)
+            self.last_request = time.monotonic()
             try:
                 with self.opener.open(req, timeout=timeout) as r:
                     return r.read(), dict(r.headers)
             except urllib.error.HTTPError:
                 raise  # the server answered; retrying the same stale request won't help
-            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
                 last = e
-                time.sleep(3 * (i + 1))
+                if wait is None:
+                    break
+                print(f"  RRC connection problem ({e}); trying again in {wait} s", flush=True)
+                time.sleep(wait)
         raise last
 
     def _rows(self, text: str):
@@ -259,8 +278,8 @@ class GoDrive:
                     f = self.files[name]
                     data = urllib.parse.urlencode({**self.fields, f["key"]: f["key"]}).encode()
                     body, headers = self._open(self.action, data, {"Content-Type": "application/x-www-form-urlencoded"}, timeout=600)
-                except urllib.error.HTTPError as e:
-                    last = e
+                except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+                    last = e  # includes HTTPError; start over with a fresh view
                     continue
                 ctype = headers.get("Content-Type", headers.get("content-type", ""))
                 if "html" in ctype and not body.startswith(b"PK"):
@@ -341,8 +360,11 @@ def county_file(fips: str, points: dict, api_rows, updated: str):
 def build(counties, out_dir=None, upload=False, workers=4):
     updated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     wl, ad = GoDrive(WELL_LAYERS), GoDrive(API_DBF)
-    wl.list()
-    ad.list()
+    try:
+        wl.list()
+        ad.list()
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+        raise SourceUnreachable(f"the RRC file site could not be reached: {e}") from e
     print(f"RRC lists: {len(wl.files)} well layer files, {len(ad.files)} API data files", flush=True)
     operators: dict[str, dict[str, int]] = {}
     leases: dict[tuple, int] = {}  # (lease, fips, operator) -> active wells, for the name search
@@ -418,6 +440,34 @@ def previous_total():
         return 0
 
 
+STALE_DAYS = 4
+
+
+def site_index_age_days():
+    """Days since the website's well index was built, or None if it has none (or can't be read)."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(f"{site()}/weather/api/wells/status", headers={"User-Agent": UA}), timeout=30) as r:
+            updated = json.loads(r.read()).get("updated")
+        if not updated:
+            return None
+        when = dt.datetime.strptime(updated, "%Y-%m-%dT%H:%MZ").replace(tzinfo=dt.timezone.utc)
+        return (dt.datetime.now(dt.timezone.utc) - when).total_seconds() / 86400
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def source_down(why: str, upload: bool) -> int:
+    """The RRC site is down. The website keeps the index it has. Only a stale or missing
+    index makes the run fail, so a short outage on their side doesn't raise an alarm."""
+    age = site_index_age_days() if upload else None
+    if age is not None and age <= STALE_DAYS:
+        print(f"::warning::Skipped today: {why}. The website keeps its index from {age:.1f} days ago; the next daily run tries again.")
+        return 0
+    have = "has no well index yet" if age is None else f"index is {age:.0f} days old"
+    print(f"::error::{why}. The website {have}; the next daily run tries again.")
+    return 1
+
+
 def main(argv=None):
     a = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     a.add_argument("--out", help="also write the files to this folder")
@@ -434,7 +484,10 @@ def main(argv=None):
     full = len(counties) == len(FIPS)
     # Counties are uploaded as they finish; the manifest and operator list go last,
     # and only after the checks pass, so a broken RRC download never replaces a good index.
-    updated, summary, operators, leases = build(counties, args.out, False if not full else args.upload)
+    try:
+        updated, summary, operators, leases = build(counties, args.out, False if not full else args.upload)
+    except SourceUnreachable as e:
+        return source_down(str(e), args.upload)
     total = sum(s["wells"] for s in summary.values())
     print(f"{len(summary)} counties, {total} wells", flush=True)
     if full:

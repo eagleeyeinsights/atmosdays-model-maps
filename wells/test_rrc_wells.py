@@ -92,7 +92,14 @@ class Fake(http.server.BaseHTTPRequestHandler):
     def names(self):
         return sorted(FILES)  # one folder holds every fake file
 
+    drops = 0  # the next N connections are cut before an answer, like the RRC site's handshake drops
+
     def do_GET(self):
+        if Fake.drops:
+            Fake.drops -= 1
+            self.close_connection = True
+            self.connection.close()
+            return
         names = self.names()
         sid = self.session() or f"s{next(Fake.sessions)}"
         Fake.pages[sid] = 0
@@ -144,6 +151,8 @@ class WellIndexTest(unittest.TestCase):
         W.MFT = base
         W.WELL_LAYERS = f"{base}/link/d551fb20-x"
         W.API_DBF = f"{base}/link/1eb94d66-x"
+        W.MIN_GAP = 0
+        W.RETRY_WAITS = (0.01, 0.01)
 
     @classmethod
     def tearDownClass(cls):
@@ -200,6 +209,32 @@ class WellIndexTest(unittest.TestCase):
         self.assertEqual(leases["leases"], sorted(leases["leases"]))
         self.assertEqual(man["wells"], 5)
         self.assertEqual(man["counties"]["389"]["located"], 3)
+
+
+    def test_dropped_connections_are_waited_out(self):
+        Fake.drops = 2  # within the retries
+        g = W.GoDrive(W.WELL_LAYERS)
+        self.assertEqual(sorted(g.list(page_rows=1)), sorted(FILES))
+
+    def test_unreachable_site_is_reported_not_a_crash(self):
+        Fake.drops = 100
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                self.assertEqual(W.main(["--out", d, "--counties", "389"]), 1)
+        finally:
+            Fake.drops = 0
+
+    def test_short_outage_with_a_fresh_index_passes(self):
+        old = W.site_index_age_days
+        try:
+            W.site_index_age_days = lambda: 1.0
+            self.assertEqual(W.source_down("down", upload=True), 0)
+            W.site_index_age_days = lambda: 9.0
+            self.assertEqual(W.source_down("down", upload=True), 1)
+            W.site_index_age_days = lambda: None
+            self.assertEqual(W.source_down("down", upload=True), 1)
+        finally:
+            W.site_index_age_days = old
 
 
 if __name__ == "__main__":
