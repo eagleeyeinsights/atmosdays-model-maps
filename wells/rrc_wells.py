@@ -40,6 +40,7 @@ import os
 import re
 import struct
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -138,15 +139,23 @@ def num(s: str):
 # ---- the RRC GoDrive file site ------------------------------------------------------
 
 class GoDrive:
-    """One shared-link folder on mft.rrc.texas.gov: list its files and download them."""
+    """One shared-link folder on mft.rrc.texas.gov: list its files and download them.
 
-    def __init__(self, link: str):
+    The site is a JSF/PrimeFaces page: a download is a form post that "clicks" a row
+    of the file table, and the server only honours a click on a row of the page the
+    table is showing right now. So a download first pages the table to that row.
+    One folder is one server-side view, so its requests take turns (a lock)."""
+
+    def __init__(self, link: str, page_rows: int = 250):
         self.link = link
+        self.page_rows = page_rows
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
         self.action = f"{MFT}/webclient/godrive/PublicGoDrive.xhtml"
         self.fields: dict[str, str] = {}
         self.files: dict[str, dict] = {}
+        self.shown: set[int] = set()  # table rows on the page the server is showing
+        self.lock = threading.Lock()
 
     def _open(self, url, data=None, headers=None, timeout=180):
         req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, **(headers or {})})
@@ -155,6 +164,8 @@ class GoDrive:
             try:
                 with self.opener.open(req, timeout=timeout) as r:
                     return r.read(), dict(r.headers)
+            except urllib.error.HTTPError:
+                raise  # the server answered; retrying the same stale request won't help
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 last = e
                 time.sleep(3 * (i + 1))
@@ -162,6 +173,7 @@ class GoDrive:
 
     def _rows(self, text: str):
         """File rows in a page or AJAX update: name, size text, modified text, row id."""
+        shown = set()
         for tr in re.split(r"<tr\b", text)[1:]:
             m = re.search(r'id="(fileTable:(\d+):(j_id_[\w]+))"[^>]*>\s*(?:<[^>]+>\s*)*([^<\s][^<]*?)\s*<', tr)
             if not m:
@@ -170,6 +182,8 @@ class GoDrive:
             name = html.unescape(m.group(4)).strip()
             modified = next((c for c in cells if re.match(r"\d{1,2}/\d{1,2}/\d{2}", c)), "")
             self.files[name] = {"key": m.group(1), "row": int(m.group(2)), "modified": modified}
+            shown.add(int(m.group(2)))
+        return shown
 
     def _form_fields(self, text: str):
         f = re.search(r'<form[^>]+id="fileList".*?</form>', text, re.S)
@@ -189,43 +203,71 @@ class GoDrive:
             self.fields["javax.faces.ViewState"] = html.unescape(vs.group(1))
         self.fields.setdefault("fileList_SUBMIT", "1")
 
-    def list(self, page_rows=250):
+    def _load(self):
+        """Open the folder page (a fresh view, showing the first page of the table)."""
         body, _ = self._open(self.link)
         text = body.decode("utf-8", "replace")
+        self.fields = {}
         self._form_fields(text)
-        self._rows(text)
-        total = re.search(r"Showing\s+\d+\s*-\s*\d+\s+of\s+([\d,]+)", text)
-        total = int(total.group(1).replace(",", "")) if total else len(self.files)
-        # Ask for the next rows after the last one shown, however many the page held.
-        first = max((f["row"] for f in self.files.values()), default=-1) + 1
-        while len(self.files) < total and first < total:
-            data = urllib.parse.urlencode({
-                "javax.faces.partial.ajax": "true", "javax.faces.source": "fileTable",
-                "javax.faces.partial.execute": "fileTable", "javax.faces.partial.render": "fileTable",
-                "fileTable": "fileTable", "fileTable_pagination": "true", "fileTable_first": str(first),
-                "fileTable_rows": str(page_rows), "fileTable_encodeFeature": "true", "fileList": "fileList",
-                "javax.faces.ViewState": self.fields.get("javax.faces.ViewState", ""),
-            }).encode()
-            part, _ = self._open(self.action, data, {"Content-Type": "application/x-www-form-urlencoded", "Faces-Request": "partial/ajax", "X-Requested-With": "XMLHttpRequest"})
-            ptext = html.unescape(part.decode("utf-8", "replace"))
-            vs = re.search(r'ViewState[^>]*><!\[CDATA\[([^\]]+)\]\]>', ptext)
-            if vs:
-                self.fields["javax.faces.ViewState"] = vs.group(1)
-            before = len(self.files)
-            self._rows(ptext)
-            if len(self.files) == before:
-                break
-            first = max(f["row"] for f in self.files.values()) + 1
+        self.shown = self._rows(text)
+        return text
+
+    def _page(self, first: int):
+        """Show the table page that starts at row `first` (the AJAX call the page's pager makes)."""
+        data = urllib.parse.urlencode({
+            "javax.faces.partial.ajax": "true", "javax.faces.source": "fileTable",
+            "javax.faces.partial.execute": "fileTable", "javax.faces.partial.render": "fileTable",
+            "fileTable": "fileTable", "fileTable_pagination": "true", "fileTable_first": str(first),
+            "fileTable_rows": str(self.page_rows), "fileTable_encodeFeature": "true", "fileList": "fileList",
+            "javax.faces.ViewState": self.fields.get("javax.faces.ViewState", ""),
+        }).encode()
+        part, _ = self._open(self.action, data, {"Content-Type": "application/x-www-form-urlencoded", "Faces-Request": "partial/ajax", "X-Requested-With": "XMLHttpRequest"})
+        ptext = html.unescape(part.decode("utf-8", "replace"))
+        vs = re.search(r'ViewState[^>]*><!\[CDATA\[([^\]]+)\]\]>', ptext)
+        if vs:
+            self.fields["javax.faces.ViewState"] = vs.group(1)
+        self.shown = self._rows(ptext)
+        return self.shown
+
+    def list(self, page_rows=None):
+        if page_rows:
+            self.page_rows = page_rows
+        with self.lock:
+            text = self._load()
+            total = re.search(r"Showing\s+\d+\s*-\s*\d+\s+of\s+([\d,]+)", text)
+            total = int(total.group(1).replace(",", "")) if total else len(self.files)
+            # Ask for the next rows after the last one shown, however many the page held.
+            first = max((f["row"] for f in self.files.values()), default=-1) + 1
+            while len(self.files) < total and first < total:
+                before = len(self.files)
+                self._page(first)
+                if len(self.files) == before:
+                    break
+                first = max(f["row"] for f in self.files.values()) + 1
         return self.files
 
     def get(self, name: str) -> bytes:
-        f = self.files[name]
-        data = urllib.parse.urlencode({**self.fields, f["key"]: f["key"]}).encode()
-        body, headers = self._open(self.action, data, {"Content-Type": "application/x-www-form-urlencoded"}, timeout=600)
-        ctype = headers.get("Content-Type", headers.get("content-type", ""))
-        if "html" in ctype and not body.startswith(b"PK"):
-            raise RuntimeError(f"{name}: got a web page instead of the file")
-        return body
+        row = self.files[name]["row"]
+        last = None
+        for attempt in range(3):
+            with self.lock:
+                try:
+                    if attempt:
+                        self._load()  # a fresh view after a failed click
+                    if row not in self.shown:
+                        self._page(row)  # the page that starts at this row, whatever size the server keeps
+                    f = self.files[name]
+                    data = urllib.parse.urlencode({**self.fields, f["key"]: f["key"]}).encode()
+                    body, headers = self._open(self.action, data, {"Content-Type": "application/x-www-form-urlencoded"}, timeout=600)
+                except urllib.error.HTTPError as e:
+                    last = e
+                    continue
+                ctype = headers.get("Content-Type", headers.get("content-type", ""))
+                if "html" in ctype and not body.startswith(b"PK"):
+                    last = RuntimeError(f"{name}: got a web page instead of the file")
+                    continue
+                return body
+        raise last
 
 
 # ---- building the index -----------------------------------------------------------------
