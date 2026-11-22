@@ -103,7 +103,7 @@ LEGENDS = {
     "radar": {"label": "Computer radar (what the model expects radar to show)", "unit": "dBZ", "steps": True, "stops": [
         [5, "#9be7f5"], [10, "#3fb7ee"], [15, "#2b6fe0"], [20, "#36d33a"], [25, "#20a72b"], [30, "#147a1d"],
         [35, "#f5ea2c"], [40, "#e7b81b"], [45, "#f58a12"], [50, "#e8221b"], [55, "#c01414"], [60, "#9b0c0c"],
-        [65, "#f02df0"], [70, "#9a4fd0"]]},
+        [65, "#f02df0"], [70, "#9a4fd0"]], "note": "HRRR and RRFS: green to red is rain, blues are snow, pinks are sleet or freezing rain"},
     "rain1": {"label": "Rain and melted snow, 1 hour", "unit": "in", "stops": [
         [0.01, "#bdf0b5"], [0.05, "#4cc94c"], [0.1, "#1e9e2a"], [0.25, "#f2e33b"], [0.5, "#f39c1f"],
         [0.75, "#e2321e"], [1.0, "#b0157f"], [2.0, "#7a2fbf"]], "note": "Lines: sea-level pressure, mb"},
@@ -147,9 +147,11 @@ LEGENDS = {
         "note": "Barbs: wind in knots. Lines: 250 mb height, dam"},
     "jet300d": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "steps": True, "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Lines: 300 mb height, dam"},
-    "mslp": {"label": "Sea-level pressure", "unit": "mb", "alpha": 110, "stops": [
-        [984, "#7c3aed"], [996, "#60a5fa"], [1008, "#f1f5f9"], [1016, "#f1f5f9"], [1026, "#fca5a5"], [1036, "#dc2626"]],
-        "note": "Lines every 2 mb. Barbs: wind at 33 ft, knots"},
+    # Pressure map: colored by wind speed at 33 ft (the "wind" colors), pressure lines on top.
+    "mslp": {"label": "Wind at 33 ft (color) and sea-level pressure (lines)", "unit": "mph", "alpha": 170, "stops": [
+        [5, "#d8ecf3"], [10, "#9fd3e6"], [20, "#5ab4d6"], [30, "#3b8f4f"], [40, "#e8d54a"], [50, "#f08a2a"],
+        [60, "#d7301f"], [75, "#8c1d6e"]],
+        "note": "Lines: pressure every 4 mb (H high, L low). Barbs: wind in knots"},
     "t3h": {"label": "Temperature change, last 3 hours", "unit": "°F", "stops": [
         [-15, "#1e3a8a"], [-10, "#2563eb"], [-5, "#60a5fa"], [-2, "#bfdbfe"], [0, "#f8fafc"], [2, "#fecaca"], [5, "#f87171"],
         [10, "#dc2626"], [15, "#7f1d1d"]], "note": "Blue: cooling (a cold front or storm outflow). Red: warming"},
@@ -254,7 +256,7 @@ FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (66, 70
         "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08),
         "jet200": (66, 70), "jet300": (66, 70), "wind500": (15, 22), "vort": (10, 14), "rh700": (60, 75), "t850": None,
         "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
-        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (66, 70), "jet300d": (66, 70), "mslp": None,
+        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (66, 70), "jet300d": (66, 70), "mslp": (8, 14),
         "shear1": (8, 14), "shear5": (15, 25),
         "chance": (5, 12), "spread": (5, 12), "smoke": (3, 8), "ptype": (0.5, 0.6), "snow6": (0.05, 0.2),
         "ice": (0.005, 0.01), "sky": (5, 30), "wind80": (5, 15), "wind100": (5, 15),
@@ -271,7 +273,7 @@ BANDS = {
     "wind": 5, "gust": 5, "wind80": 5, "wind100": 5, "upper": "stops", "jet200": "stops", "jet250": "stops", "jet300": "stops",
     "jet300d": "stops", "wind500": 5, "shear1": 5, "shear5": 5, "shear6": 5,
     "cape": 250, "mlcape": 250, "cape3h": 250, "cin": 25, "srh1": 25, "lapse": 0.25, "pwat": 0.1,
-    "vort": 2, "rh700": 5, "spread": 5, "sky": 10, "stp": 0.5, "scp": 1, "mslp": 2,
+    "vort": 2, "rh700": 5, "spread": 5, "sky": 10, "stp": 0.5, "scp": 1, "mslp": 5,
     **{k: "stops" for k in ("precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice", "hail", "ltng", "uh",
                             "prob", "chance", "smoke")},
 }
@@ -1381,13 +1383,40 @@ def ptype_pic(ar, ptype, rate=None, msl=None, thick=None, n=8, every=4):
     return picture(ar, ptype_rgba(ptype, rate), lines, sharp=True, centers=centers)
 
 
+# Computer radar where it's snowing or icing, like Tropical Tidbits' "Radar (Rain/Frozen)"
+# and the future radar on TV and weather apps: rain in the usual radar colors, snow in
+# blues and sleet/freezing rain in pinks, each darker as the echo gets stronger.
+RADAR_SNOW = [(5, "#cfe6ff"), (15, "#93c5fd"), (20, "#60a5fa"), (25, "#3b82f6"), (30, "#1d4ed8"), (35, "#1e3a8a"), (45, "#312e81")]
+RADAR_RAIN = [(5, "#b9efb2"), (10, "#7fdc78"), (15, "#3fbf4a"), (20, "#36d33a"), (25, "#20a72b"), (30, "#147a1d"),
+              (35, "#f5ea2c"), (40, "#e7b81b"), (45, "#f58a12"), (50, "#e8221b"), (55, "#c01414"), (60, "#9b0c0c"),
+              (65, "#f02df0"), (70, "#9a4fd0")]
+RADAR_MIX = [(5, "#fbcfe8"), (15, "#f9a8d4"), (25, "#f472b6"), (30, "#ec4899"), (35, "#db2777"), (45, "#9d174d")]
+
+
+def radar_pic(ar, refc, ptype=None):
+    rgba = fill(refc, "radar")
+    if rgba is None or ptype is None:
+        return picture(ar, rgba, sharp=True)
+    r = np.nan_to_num(refc, nan=-99)
+    # Light rain in greens (the plain radar colors start in light blue, which would read as snow here).
+    for codes, ramp in (((1,), RADAR_RAIN), ((2,), RADAR_SNOW), ((3, 4), RADAR_MIX)):
+        here = np.isin(ptype, codes) & (rgba[..., 3] > 0)
+        if not here.any():
+            continue
+        xs = np.array([s for s, _ in ramp], float)
+        cols = np.array([hexc(c) for _, c in ramp], np.uint8)
+        idx = np.clip(np.searchsorted(xs, r[here], side="right") - 1, 0, len(xs) - 1)
+        rgba[here, :3] = cols[idx]
+    return picture(ar, rgba, sharp=True)
+
+
 def draw_rrfs(f, h):
     ar = area("conus")
     out = {
         "ltng": picture(ar, fill(f.get("ltng"), "ltng")),
         **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
         **(draw_hrrr_extra(ar, f) if f["msl"] is not None else draw_hrrr_upper(ar, f)),
-        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "radar": radar_pic(ar, f["refc"], f.get("ptype")),
         "temp": temp_pic(ar, f["t2"]),
         "rain1": rain_pic(ar, f["tp1"], "rain1", f["msl"], 14),
         "gust": picture(ar, fill(f["gust"], "gust")),
@@ -1727,7 +1756,7 @@ def storm_model_fields(url):
 def draw_storm_model(f, h):
     ar = area("conus")
     out = {
-        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "radar": radar_pic(ar, f["refc"], f.get("ptype")),
         "temp": temp_pic(ar, f["t2"]) if f["t2"] is not None else picture(ar, None),
         "dew": picture(ar, fill(f["d2"], "dew")),
         "gust": picture(ar, fill(f["gust"], "gust")),
@@ -1812,12 +1841,17 @@ def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None, centers=None)
             continue
         cs = ax.contour(xs, ys, field, levels=levels, colors=color, linewidths=width_, linestyles="dashed" if dashed else "solid")
         if labels:
-            texts = ax.clabel(cs, fmt="%d", fontsize=10, inline=True, inline_spacing=2)
-            # A line's number right on top of an H or L and its value is dropped.
+            texts = ax.clabel(cs, fmt="%d", fontsize=11, inline=True, inline_spacing=3)
+            # A line's number right on top of an H or L and its value is dropped; the rest get
+            # a white edge so they read over any color, like the labels on Pivotal and Tropical Tidbits.
+            import matplotlib.patheffects as pe
             for t in texts or []:
                 tx, ty = t.get_position()
                 if any(abs(tx - cx) < 30 and -14 < ty - cy < 36 for cx, cy, *_ in centers or []):
                     t.remove()
+                else:
+                    t.set_fontweight("bold")
+                    t.set_path_effects([pe.withStroke(linewidth=2.6, foreground="white")])
     if barbs is not None:
         bu, bv, step, color = barbs
         o = step // 2
@@ -1912,17 +1946,24 @@ def upper_pic(ar, f):
 
 
 def mslp_pic(ar, msl, u, v, n):
-    s = smooth(msl, n)
-    lines = [(s, np.arange(940, 1068, 2), "#334155", 0.8, True, False)]
-    return picture(ar, colorize(s, "mslp"), lines, barbs=(u, v, BARB_GAP, "#1f2937") if u is not None else None,
+    """Pressure and wind, like Tropical Tidbits' "MSLP & 10m Wind": the color is wind
+    speed at 33 ft, dark pressure lines every 4 mb (smoothed so the mountains don't
+    make little loops) with labels, big H and L, and gray wind barbs."""
+    s = smooth(msl, int(n * 2.2))
+    lines = [(s, MSL_LEVELS, "#111827", 1.1, True, False)]
+    fill_ = colorize(np.hypot(u, v) * 1.15078, "mslp") if u is not None else None  # kt -> mph
+    return picture(ar, fill_, lines, barbs=(u, v, MSLP_BARB_GAP, "#475569") if u is not None else None,
                    centers=pressure_centers(s))
+
+
+MSLP_BARB_GAP = 58
 
 
 def shear_pic(ar, u, v, legend):
     return picture(ar, colorize(np.hypot(u, v), legend), barbs=(u, v, BARB_GAP, "#111827"))
 
 
-JET_BARB_GAP = 64  # jet maps: fewer barbs so the wind colors and height lines read
+JET_BARB_GAP = 72  # jet maps: fewer barbs so the wind colors and height lines read
 
 
 def jet_map(ar, u, v, legend, z=None, zlevels=None, n=3):
@@ -1933,7 +1974,7 @@ def jet_map(ar, u, v, legend, z=None, zlevels=None, n=3):
     speed = np.hypot(u, v)
     if n > 3:
         speed = smooth(speed, 2)
-    return picture(ar, colorize(speed, legend), lines, barbs=(u, v, JET_BARB_GAP, "#1f2937"))
+    return picture(ar, colorize(speed, legend), lines, barbs=(u, v, JET_BARB_GAP, "#334155"))
 
 
 def jet_pic(ar, u, v, legend, z=None, zlevels=None):
@@ -1994,7 +2035,7 @@ def draw_upper(ar, f):
 def draw_hrrr(f, h):
     ar = area("conus")
     return {
-        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "radar": radar_pic(ar, f["refc"], f.get("ptype")),
         "temp": temp_pic(ar, f["t2"]),
         "rain1": rain_pic(ar, f["tp1"], "rain1", f["msl"], 14),
         "gust": picture(ar, colorize(f["gust"], "gust")),
@@ -2031,7 +2072,7 @@ def draw_hrrr_extra(ar, f):
 def draw_href(f, h):
     ar = area("conus")
     return {
-        "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
+        "radar": radar_pic(ar, f["refc"], f.get("ptype")),
         "temp": temp_pic(ar, f["t2"]),
         "rain1": rain_pic(ar, f["tp1"], "rain1", f["msl"], 14),
         "storms40": picture(ar, fill(f["p40"], "prob")),
