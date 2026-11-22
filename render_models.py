@@ -935,6 +935,8 @@ def hrrr_fields(run, h):
         **{f"{c}{p}": (lambda c, p: lambda v, lv, f, r: v == {"u": "UGRD", "v": "VGRD"}[c] and lv == f"{p} mb")(c, p)
            for c in "uv" for p in (250, 300, 500, 700, 850)},
         "z850": lambda v, lv, f, r: v == "HGT" and lv == "850 mb",
+        # 1000 mb height for the 1000-500 mb thickness on the rain/snow type map.
+        "z1000": lambda v, lv, f, r: v == "HGT" and lv == "1000 mb",
         "t850": lambda v, lv, f, r: v == "TMP" and lv == "850 mb",
         "d700": lambda v, lv, f, r: v == "DPT" and lv == "700 mb",
         # Wildfire smoke 8 m above the ground and rain/snow/sleet/freezing rain, like the RRFS maps.
@@ -993,6 +995,7 @@ def hrrr_fields(run, h):
         "z850": g["z850"] / 10 if "z850" in g else None, "t850": g["t850"] - 273.15 if "t850" in g else None,
         "rh700": rh_from(g["t700"], g["d700"]) if "t700" in g and "d700" in g else None,
         "z250": g["z250"] / 10 if "z250" in g else None, "z300": g["z300"] / 10 if "z300" in g else None,
+        **rate_thick(g, None),
     }
 
 
@@ -1233,7 +1236,7 @@ def rrfs_fields(run, h):
     upper = {
         **{f"{c}{p}": (lambda var, lvl: lambda v, lv, f, r: v == var and lv == lvl)({"u": "UGRD", "v": "VGRD"}[c], f"{p} mb")
            for c in "uv" for p in (250, 300, 500, 700, 850)},
-        **{f"z{p}": (lambda lvl: lambda v, lv, f, r: v == "HGT" and lv == lvl)(f"{p} mb") for p in (250, 300, 500, 700, 850)},
+        **{f"z{p}": (lambda lvl: lambda v, lv, f, r: v == "HGT" and lv == lvl)(f"{p} mb") for p in (250, 300, 500, 700, 850, 1000)},
         "t500": lambda v, lv, f, r: v == "TMP" and lv == "500 mb",
         "t700": lambda v, lv, f, r: v == "TMP" and lv == "700 mb",
         "d700": lambda v, lv, f, r: v == "DPT" and lv == "700 mb",
@@ -1279,6 +1282,7 @@ def rrfs_fields(run, h):
         "z850": g["z850"] / 10 if "z850" in g else None, "t850": g["t850"] - 273.15 if "t850" in g else None,
         "rh700": rh_from(g["t700"], g["d700"]) if "t700" in g and "d700" in g else None,
         "z250": g["z250"] / 10 if "z250" in g else None, "z300": g["z300"] / 10 if "z300" in g else None,
+        **rate_thick(g, None),
     }
 
 
@@ -1354,10 +1358,11 @@ def ptype_rgba(ptype, rate):
     return out
 
 
-def ptype_pic(ar, ptype, rate=None, msl=None, thick=None, n=8):
+def ptype_pic(ar, ptype, rate=None, msl=None, thick=None, n=8, every=4):
     """The main map on most weather model sites: what's falling and how hard, with
     sea-level pressure lines, H and L centers and the 1000-500 mb thickness (dashed,
-    blue at 540 and below where snow is likely, red above)."""
+    blue at 540 and below where snow is likely, red above). Storm models (HRRR, RRFS)
+    get pressure lines every 2 mb and less smoothing, like Pivotal's maps of them."""
     if ptype is None:
         return picture(ar, None)
     lines, centers = [], None
@@ -1366,8 +1371,13 @@ def ptype_pic(ar, ptype, rate=None, msl=None, thick=None, n=8):
         lines += [(t, THICK_COLD, "#1d4ed8", 0.9, True, True), (t, THICK_WARM, "#dc2626", 0.9, True, True)]
     if msl is not None:
         s = smooth(msl, n)
-        lines.append((s, MSL_LEVELS, "#334155", 0.9, True, False))
-        centers = pressure_centers(s)
+        lines.append((s, np.arange(940, 1068, every), "#334155", 0.9, True, False))
+        if n >= 8:
+            centers = pressure_centers(s)
+        else:
+            # Find the centers on a smoother field (no small bumps over the mountains),
+            # but print the pressure from the lines' field so it matches the closed lines.
+            centers = [(x, y, k, f"{s[int(y), int(x)]:.0f}", c) for x, y, k, _, c in pressure_centers(smooth(msl, 14))]
     return picture(ar, ptype_rgba(ptype, rate), lines, sharp=True, centers=centers)
 
 
@@ -1388,7 +1398,7 @@ def draw_rrfs(f, h):
         "snow": picture(ar, fill(f["snow"], "snow")),
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "smoke": picture(ar, fill(f["smoke"], "smoke")),
-        "ptype": ptype_pic(ar, f["ptype"], f.get("tp1"), f.get("msl"), n=14),
+        "ptype": ptype_pic(ar, f["ptype"], f.get("tp1"), f.get("msl"), f.get("thick"), n=6, every=2),
     }
     return out
 
@@ -1996,7 +2006,7 @@ def draw_hrrr(f, h):
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "ltng": picture(ar, fill(f["ltng"], "ltng")),
         "smoke": picture(ar, fill(f.get("smoke"), "smoke")),
-        "ptype": ptype_pic(ar, f.get("ptype"), f.get("tp1"), f.get("msl"), n=14),
+        "ptype": ptype_pic(ar, f.get("ptype"), f.get("tp1"), f.get("msl"), f.get("thick"), n=6, every=2),
         **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
         **draw_hrrr_extra(ar, f),
     }
