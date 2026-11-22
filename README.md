@@ -9,6 +9,15 @@ All the data is free and public. NOAA is retiring the HREF, NAM and HiResW
 ARW2 and FV3) until NOAA stops them; after 3 days with no new run the job takes
 each off the page by itself (`SUNSET` in `render_models.py`).
 
+The storm models (HRRR and RRFS) draw the same list of maps, and so do the big
+global models (GFS, ECMWF, AI GFS, European AI), wherever the free data has the
+field; every model's list comes in one order (`MAP_ORDER`). The RRFS jet stream
+and 500/700/850 mb maps come from its pressure-level file (`prslev`), the rest
+from its 2-D file. A map with no data for an hour (rain totals at hour 0, a field
+a file lacks) gets no picture; the manifest gives each model's `fields` (only
+maps that got pictures), `fieldHours` (a map's hours when they differ from the
+run's) and a `note` saying what that model's free data can't show.
+
 The models run as separate groups side by side (see the workflow), and each
 upload merges only its own model into the website's map list.
 

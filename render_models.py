@@ -2520,6 +2520,7 @@ def main():
         if a.upload:
             publish(model, manifest)
     if a.out:
+        os.makedirs(a.out, exist_ok=True)  # nothing drawn (no new run) leaves no folder yet
         with open(os.path.join(a.out, "manifest.json"), "w") as f:
             json.dump(manifest, f)
     return 1 if failed else 0
