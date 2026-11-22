@@ -196,7 +196,8 @@ LEGENDS = {
         "note": "35 and up is unhealthy for sensitive groups (like PM2.5)"},
     "ptype": {"label": "Rain, snow, sleet or freezing rain", "unit": "", "steps": True, "min": "Rain", "max": "Freezing rain",
               "stops": [[1, "#22c55e"], [2, "#3b82f6"], [3, "#f97316"], [4, "#ec4899"]],
-              "note": "Green: rain. Blue: snow. Orange: sleet. Pink: freezing rain"},
+              "note": "Green: rain. Blue: snow. Orange: sleet. Pink: freezing rain. Darker = falling harder. "
+                      "Gray lines: sea-level pressure. Dashed: 1000-500 mb thickness (blue 540 and below, snow likely)"},
     "snow6": {"label": "Snowfall, 6 hours", "unit": "in", "stops": [
         [0.1, "#dbeafe"], [0.5, "#93c5fd"], [1, "#60a5fa"], [2, "#2563eb"], [4, "#1e3a8a"], [6, "#7c3aed"], [8, "#c026d3"],
         [12, "#f472b6"]]},
@@ -599,6 +600,8 @@ GFS_WANT = {
     # Rain, snow, sleet or freezing rain right at the map time (the first listing; the
     # 6-hour averages come after it).
     "crain": "CRAIN:surface:", "csnow": "CSNOW:surface:", "cicep": "CICEP:surface:", "cfrzr": "CFRZR:surface:",
+    # How hard it's falling right then (shades the type map) and the 1000 mb height for thickness.
+    "prate": "PRATE:surface:", "z1000": "HGT:1000 mb:",
 }
 
 
@@ -651,7 +654,18 @@ def gfs_fields(run, h):
         "w100": np.hypot(g["u100"], g["v100"]) * 2.23694 if "u100" in g and "v100" in g else None,
         "snow": gfs_snow_total(run, h) if h >= 6 else None,
         "ptype": ptype_from(g) if h > 0 else None,
+        **rate_thick(g, "prate"),
     }
+    return out
+
+
+def rate_thick(g, rate_key):
+    """Rain/snow rate (inches of water an hour, from kg/m2/s) and 1000-500 mb thickness (dam)."""
+    out = {}
+    if rate_key in g:
+        out["prate"] = g[rate_key] * 3600 / 25.4
+    if "z1000" in g and "z500" in g:
+        out["thick"] = (g["z500"] - g["z1000"]) / 10
     return out
 
 
@@ -738,7 +752,8 @@ EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v
            ("10fg", None): "gust", ("100u", None): "u100", ("100v", None): "v100", ("ptype", None): "ptype",
            # The rain/snow rate right now: ECMWF gives a type even where almost nothing falls.
            ("tprate", None): "tprate",
-           ("u", "700"): "u700", ("v", "700"): "v700", ("u", "850"): "u850", ("v", "850"): "v850"}
+           ("u", "700"): "u700", ("v", "700"): "v700", ("u", "850"): "u850", ("v", "850"): "v850",
+           ("gh", "1000"): "z1000"}
 # ECMWF precipitation type codes -> our 1 rain, 2 snow, 3 sleet or mix, 4 freezing rain.
 EC_PTYPE = {1: 1, 5: 2, 6: 2, 7: 3, 8: 3, 3: 4, 12: 4}
 
@@ -841,6 +856,7 @@ def ec_fields(run, h):
         # Without the rate to say where it's really falling, no rain-or-snow map for that hour.
         "ptype": ec_ptype(g["ptype"], g["tprate"]) if h > 0 and "ptype" in g and "tprate" in g else None,
         "w100": np.hypot(g["u100"], g["v100"]) * 2.23694 if "u100" in g and "v100" in g else None,
+        **rate_thick(g, "tprate"),
         **surface_wind(g),
         # ECMWF gives relative vorticity; add the Earth's spin to match GFS's absolute vorticity.
         **upper_air(g, lambda: (g["vo500"] + coriolis(area("na"))) * 1e5),
@@ -1290,8 +1306,49 @@ def rrfs_before(run, h):
     return out
 
 
-def ptype_pic(ar, ptype):
-    return picture(ar, fill(ptype, "ptype"), sharp=True)
+# Rain, snow, sleet and freezing rain each go from light to dark as more falls, like the
+# precip-type maps on Pivotal Weather: under 0.02, 0.02-0.05, 0.05-0.1, 0.1-0.25 and
+# 0.25+ inches of water an hour.
+PTYPE_RAMPS = {
+    1: ["#a7f3a0", "#4ade80", "#16a34a", "#eab308", "#dc2626"],
+    2: ["#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a", "#7c3aed"],
+    3: ["#fed7aa", "#fb923c", "#ea580c", "#c2410c", "#9a3412"],
+    4: ["#fbcfe8", "#f472b6", "#db2777", "#be185d", "#9d174d"],
+}
+PTYPE_RATE_STEPS = np.array([0.02, 0.05, 0.1, 0.25])
+THICK_COLD = np.arange(474, 541, 6)  # 1000-500 mb thickness, dam: 540 is the old rain/snow line
+THICK_WARM = np.arange(546, 601, 6)
+
+
+def ptype_rgba(ptype, rate):
+    """Type colors, darker where it falls harder (flat type colors when the rate is unknown)."""
+    if rate is None:
+        return fill(ptype, "ptype")
+    out = np.zeros(ptype.shape + (4,), np.uint8)
+    step = np.digitize(np.nan_to_num(rate, nan=0.0), PTYPE_RATE_STEPS)
+    for code, ramp in PTYPE_RAMPS.items():
+        rgb = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in ramp], np.uint8)
+        here = ptype == code
+        out[here, :3] = rgb[step[here]]
+        out[here, 3] = SOLID
+    return out
+
+
+def ptype_pic(ar, ptype, rate=None, msl=None, thick=None, n=8):
+    """The main map on most weather model sites: what's falling and how hard, with
+    sea-level pressure lines, H and L centers and the 1000-500 mb thickness (dashed,
+    blue at 540 and below where snow is likely, red above)."""
+    if ptype is None:
+        return picture(ar, None)
+    lines, centers = [], None
+    if thick is not None:
+        t = smooth(thick, 4)
+        lines += [(t, THICK_COLD, "#1d4ed8", 0.9, True, True), (t, THICK_WARM, "#dc2626", 0.9, True, True)]
+    if msl is not None:
+        s = smooth(msl, n)
+        lines.append((s, MSL_LEVELS, "#334155", 0.9, True, False))
+        centers = pressure_centers(s)
+    return picture(ar, ptype_rgba(ptype, rate), lines, sharp=True, centers=centers)
 
 
 def draw_rrfs(f, h):
@@ -1311,7 +1368,7 @@ def draw_rrfs(f, h):
         "snow": picture(ar, fill(f["snow"], "snow")),
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "smoke": picture(ar, fill(f["smoke"], "smoke")),
-        "ptype": ptype_pic(ar, f["ptype"]),
+        "ptype": ptype_pic(ar, f["ptype"], f.get("tp1"), f.get("msl"), n=14),
     }
     return out
 
@@ -1799,7 +1856,7 @@ def draw(fields, h):
     if "w100" in fields:
         out["wind100"] = picture(ar, fill(fields["w100"], "wind100"))
     if "ptype" in fields:
-        out["ptype"] = ptype_pic(ar, fields["ptype"])
+        out["ptype"] = ptype_pic(ar, fields["ptype"], fields.get("prate"), fields["msl"], fields.get("thick"))
     out["mslp"] = mslp_pic(ar, fields["msl"], fields.get("u10kt"), fields.get("v10kt"), 6)
     if "shr_u" in fields:
         out["shear"] = shear_pic(ar, fields["shr_u"], fields["shr_v"], "shear5")
@@ -1907,7 +1964,7 @@ def draw_hrrr(f, h):
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "ltng": picture(ar, fill(f["ltng"], "ltng")),
         "smoke": picture(ar, fill(f.get("smoke"), "smoke")),
-        "ptype": ptype_pic(ar, f.get("ptype")),
+        "ptype": ptype_pic(ar, f.get("ptype"), f.get("tp1"), f.get("msl"), n=14),
         **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
         **draw_hrrr_extra(ar, f),
     }
