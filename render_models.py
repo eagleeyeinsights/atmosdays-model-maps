@@ -2358,8 +2358,9 @@ HRRR_MESO = ["mlcape", "cin", "shear6", "shear1", "srh1", "lapse", "pwat", "stp"
 STORM_FULL = ["radar", "ptype", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng", "smoke"] + HRRR_MESO
 GLOBAL_FULL = FIELDS + ["ptype", "dew", "cape", "qpf", "snow", "gust", "wind100", "mslp", "shear"] + UPPER_MAPS
 
-# One order for every model's map list (the first is the one a model opens on).
-MAP_ORDER = ["temp", "dew", "radar", "ptype", "precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice6", "pop6", "tstm",
+# One order for every model's map list (the first is the one a model opens on: what's
+# falling with pressure and thickness lines, the main map on Pivotal Weather too).
+MAP_ORDER = ["ptype", "temp", "dew", "radar", "precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice6", "pop6", "tstm",
              "wind", "gust", "wind80", "wind100", "sky", "mslp", "t3h", "td3h", "cape", "mlcape", "cin", "cape3h", "shear",
              "shear6", "shear1", "srh1", "lapse", "pwat", "stp", "scp", "uh", "hail", "ltng", "smoke",
              "upper", "jet250", "h200", "h300", "jet300", "h500w", "h500", "h700", "h850",
