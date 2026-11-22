@@ -23,6 +23,10 @@ on:
         description: 'Test: build 5 counties and keep them as a download, upload nothing'
         type: boolean
         default: false
+      diagnose:
+        description: 'Check only: can 4 GitHub computers reach the RRC file site? Builds and uploads nothing'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,8 +36,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  diagnose:
+    # One read-only look at the RRC file site from 4 GitHub computers at once,
+    # to see whether some of GitHub's addresses are turned away and others aren't.
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps' && inputs.diagnose
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        computer: [1, 2, 3, 4]
+    steps:
+      - name: This computer's internet address
+        run: curl -s --max-time 10 https://api.ipify.org || echo unknown
+      - name: Connect to the RRC well layer folder (curl)
+        run: |
+          for i in 1 2 3; do
+            curl -sS -v -L --max-time 20 -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+              'https://mft.rrc.texas.gov/link/d551fb20-442e-4b67-84fa-ac3f23ecabb4' 2>&1 \
+              | grep -E '^(\* (Trying|Connected|SSL|TLS|ALPN|OpenSSL|Recv failure|Connection)|HTTP |curl:)|^< HTTP' || true
+            sleep 5
+          done
+      - name: TLS handshake (openssl)
+        run: echo | timeout 20 openssl s_client -connect mft.rrc.texas.gov:443 -servername mft.rrc.texas.gov -brief 2>&1 | head -15 || true
+
   wells:
-    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps' && !inputs.diagnose
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
