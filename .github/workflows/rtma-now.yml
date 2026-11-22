@@ -1,0 +1,50 @@
+name: 15-minute current conditions (RTMA)
+
+# NOAA's 15-minute "right now" weather map (RTMA Rapid Update, free on AWS) for
+# the current-conditions card on https://atmosdays.eagleeyeinsightsllc.com
+# (Plus, Pro and Weather+ members). Uploads one ~21 MB grid and a small JSON
+# file. Needs the MODELS_UPLOAD_KEY secret (same as the model maps job).
+#
+# NOAA posts each map about 15 to 20 minutes after its time, so this runs at
+# :03, :18, :33 and :48, just after a new one usually lands. A run takes under a
+# minute, and this repo is public, so it is free.
+on:
+  schedule:
+    - cron: '3,18,33,48 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Test: print checks, upload nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rtma-now
+  cancel-in-progress: true
+
+jobs:
+  rtma:
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Build and upload
+        if: ${{ !inputs.test_only }}
+        env:
+          MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
+          MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
+        run: python now/rtma_now.py --upload
+      - name: Test (nothing uploaded)
+        if: ${{ inputs.test_only }}
+        run: python now/rtma_now.py --test
