@@ -593,6 +593,7 @@ GFS_WANT = {
     "z200": "HGT:200 mb:", "u200": "UGRD:200 mb:", "v200": "VGRD:200 mb:",
     "z300": "HGT:300 mb:", "u300": "UGRD:300 mb:", "v300": "VGRD:300 mb:", "av500": "ABSV:500 mb:",
     "z700": "HGT:700 mb:", "rh700": "RH:700 mb:", "z850": "HGT:850 mb:", "t850": "TMP:850 mb:",
+    "u700": "UGRD:700 mb:", "v700": "VGRD:700 mb:", "u850": "UGRD:850 mb:", "v850": "VGRD:850 mb:",
     # Gusts and wind at 100 m (330 ft, wind-farm hub height), like the other big models.
     "gust": "GUST:surface:", "u100": "UGRD:100 m above ground:", "v100": "VGRD:100 m above ground:",
     # Rain, snow, sleet or freezing rain right at the map time (the first listing; the
@@ -711,8 +712,9 @@ def upper_air(g, vort):
     """Upper-air fields in map units: heights in dam, wind in mph, vorticity x1e-5/s, RH %, temperature C."""
     out = {}
     try:
-        if "u500" in g and "v500" in g:
-            out.update(jet(g, 500))
+        for lv in (500, 700, 850):  # barbs on the 500, 700 and 850 mb maps, like the HRRR and RRFS
+            if f"u{lv}" in g and f"v{lv}" in g:
+                out.update({k: v for k, v in jet(g, lv).items() if not k.startswith("z")})
         for lv in (200, 300):
             out[f"z{lv}"] = g[f"z{lv}"] / 10
             out.update(jet(g, lv))
@@ -733,16 +735,22 @@ EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v
            ("v", "300"): "v300", ("vo", "500"): "vo500", ("gh", "700"): "z700", ("r", "700"): "rh700", ("gh", "850"): "z850",
            ("t", "850"): "t850", ("u", "500"): "u500", ("v", "500"): "v500",
            # Gusts (the strongest in the last few hours) and wind at 100 m (330 ft).
-           ("10fg", None): "gust", ("100u", None): "u100", ("100v", None): "v100", ("ptype", None): "ptype"}
+           ("10fg", None): "gust", ("100u", None): "u100", ("100v", None): "v100", ("ptype", None): "ptype",
+           # The rain/snow rate right now: ECMWF gives a type even where almost nothing falls.
+           ("tprate", None): "tprate",
+           ("u", "700"): "u700", ("v", "700"): "v700", ("u", "850"): "u850", ("v", "850"): "v850"}
 # ECMWF precipitation type codes -> our 1 rain, 2 snow, 3 sleet or mix, 4 freezing rain.
 EC_PTYPE = {1: 1, 5: 2, 6: 2, 7: 3, 8: 3, 3: 4, 12: 4}
 
 
-def ec_ptype(code):
+def ec_ptype(code, rate=None):
+    """Our type codes from ECMWF's, left blank where less than 0.1 mm (0.004 inch) an hour falls."""
     out = np.full(code.shape, np.nan)
     c = np.rint(code)
     for k, v in EC_PTYPE.items():
         out = np.where(c == k, v, out)
+    if rate is not None:
+        out = np.where(rate * 3600 >= 0.1, out, np.nan)  # kg/m2/s -> mm/h
     return out
 
 
@@ -830,7 +838,8 @@ def ec_fields(run, h):
         # Snowfall comes as meters of melted water; 10 inches of snow per inch of water.
         "snow": g["sf"] * 39.37 * 10 if h >= 6 and "sf" in g else None,
         "gust": g["gust"] * 2.23694 if h >= 3 and "gust" in g else None,
-        "ptype": ec_ptype(g["ptype"]) if h > 0 and "ptype" in g else None,
+        # Without the rate to say where it's really falling, no rain-or-snow map for that hour.
+        "ptype": ec_ptype(g["ptype"], g["tprate"]) if h > 0 and "ptype" in g and "tprate" in g else None,
         "w100": np.hypot(g["u100"], g["v100"]) * 2.23694 if "u100" in g and "v100" in g else None,
         **surface_wind(g),
         # ECMWF gives relative vorticity; add the Earth's spin to match GFS's absolute vorticity.
@@ -1664,7 +1673,8 @@ def pressure_centers(msl, n_px=90):
     size = 2 * n_px + 1
     around = uniform_filter(a, size=size, mode="nearest")
     # Not next to the edge of the model's area (blank there), where the filled-in values aren't real.
-    ok = uniform_filter((~np.isfinite(msl)).astype(np.float32), size=size, mode="nearest") < 1e-6
+    # (a small margin only: a high or low right inside the model's edge is still labelled)
+    ok = uniform_filter((~np.isfinite(msl)).astype(np.float32), size=41, mode="nearest") < 1e-6
     out = []
     edge = 20  # labels right at the picture's edge get cut off
     for kind, peak, color, test in (("H", maximum_filter(a, size=size, mode="nearest"), "#1d4ed8", lambda v, m: v - m >= 2),
@@ -1729,8 +1739,8 @@ def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None, centers=None)
     import matplotlib.patheffects as pe
     halo = [pe.withStroke(linewidth=2.5, foreground="white")]
     for x, y, letter, value, color in centers or []:
-        ax.text(x, y, letter, color=color, fontsize=17, fontweight="bold", ha="center", va="center", path_effects=halo)
-        ax.text(x, y + 15, value, color=color, fontsize=8, fontweight="bold", ha="center", va="center", path_effects=halo)
+        ax.text(x, y, letter, color=color, fontsize=22, fontweight="bold", ha="center", va="center", path_effects=halo)
+        ax.text(x, y + 19, value, color=color, fontsize=9, fontweight="bold", ha="center", va="center", path_effects=halo)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", transparent=True, dpi=100)
     buf.seek(0)
@@ -1866,6 +1876,7 @@ def draw_upper(ar, f):
     if "z200" not in f:
         return {}
     black = "#111827"
+    bar = lambda k: (*f[k], BARB_GAP, black) if f.get(k) is not None else None  # noqa: E731
     return {
         "h200": picture(ar, colorize(f["w200"], "jet200"), [(smooth(f["z200"], 3), np.arange(1080, 1290, 12), black, 1.0, True, False)],
                         barbs=(*f["b200"], BARB_GAP, black)),
@@ -1873,9 +1884,11 @@ def draw_upper(ar, f):
                         barbs=(*f["b300"], BARB_GAP, black)),
         **({"h500w": h500w_pic(ar, f)} if "w500" in f else {}),
         "h500": picture(ar, colorize(smooth(f["av500"], 2), "vort"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), black, 1.0, True, False)]),
-        "h700": picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 3), np.arange(240, 336, 3), black, 0.9, True, False)]),
+        "h700": picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 3), np.arange(240, 336, 3), black, 0.9, True, False)],
+                        barbs=bar("b700")),
         "h850": picture(ar, colorize(f["t850"], "t850"), [(smooth(f["t850"], 3), [0], "#1d4ed8", 1.6, False, True),
-                                                       (smooth(f["z850"], 3), np.arange(105, 171, 3), black, 0.9, True, False)]),
+                                                       (smooth(f["z850"], 3), np.arange(105, 171, 3), black, 0.9, True, False)],
+                        barbs=bar("b850")),
     }
 
 
