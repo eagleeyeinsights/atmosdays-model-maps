@@ -1312,8 +1312,9 @@ def rrfs_before(run, h):
 PTYPE_RAMPS = {
     1: ["#a7f3a0", "#4ade80", "#16a34a", "#eab308", "#dc2626"],
     2: ["#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a", "#7c3aed"],
-    3: ["#fed7aa", "#fb923c", "#ea580c", "#c2410c", "#9a3412"],
-    4: ["#fbcfe8", "#f472b6", "#db2777", "#be185d", "#9d174d"],
+    # Ice matters most, so even light sleet and freezing rain stand out.
+    3: ["#fdba74", "#fb923c", "#ea580c", "#c2410c", "#9a3412"],
+    4: ["#f9a8d4", "#f472b6", "#db2777", "#be185d", "#9d174d"],
 }
 PTYPE_RATE_STEPS = np.array([0.02, 0.05, 0.1, 0.25])
 THICK_COLD = np.arange(474, 541, 6)  # 1000-500 mb thickness, dam: 540 is the old rain/snow line
@@ -1325,10 +1326,14 @@ def ptype_rgba(ptype, rate):
     if rate is None:
         return fill(ptype, "ptype")
     out = np.zeros(ptype.shape + (4,), np.uint8)
-    step = np.digitize(np.nan_to_num(rate, nan=0.0), PTYPE_RATE_STEPS)
+    r = np.nan_to_num(rate, nan=0.0)
+    step = np.digitize(r, PTYPE_RATE_STEPS)
+    # Under 0.01 inch an hour is left clear (like Pivotal): otherwise the models' trace
+    # amounts speckle Mexico, the oceans and the desert with light green dots.
+    falling = r >= 0.01
     for code, ramp in PTYPE_RAMPS.items():
         rgb = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in ramp], np.uint8)
-        here = ptype == code
+        here = (ptype == code) & falling
         out[here, :3] = rgb[step[here]]
         out[here, 3] = SOLID
     return out
@@ -1342,7 +1347,7 @@ def ptype_pic(ar, ptype, rate=None, msl=None, thick=None, n=8):
         return picture(ar, None)
     lines, centers = [], None
     if thick is not None:
-        t = smooth(thick, 4)
+        t = smooth(thick, 6)  # smoothed enough that the mountains don't make little loops
         lines += [(t, THICK_COLD, "#1d4ed8", 0.9, True, True), (t, THICK_WARM, "#dc2626", 0.9, True, True)]
     if msl is not None:
         s = smooth(msl, n)
@@ -1782,7 +1787,12 @@ def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None, centers=None)
             continue
         cs = ax.contour(xs, ys, field, levels=levels, colors=color, linewidths=width_, linestyles="dashed" if dashed else "solid")
         if labels:
-            ax.clabel(cs, fmt="%d", fontsize=8, inline=True, inline_spacing=2)
+            texts = ax.clabel(cs, fmt="%d", fontsize=10, inline=True, inline_spacing=2)
+            # A line's number right on top of an H or L and its value is dropped.
+            for t in texts or []:
+                tx, ty = t.get_position()
+                if any(abs(tx - cx) < 30 and -14 < ty - cy < 36 for cx, cy, *_ in centers or []):
+                    t.remove()
     if barbs is not None:
         bu, bv, step, color = barbs
         o = step // 2
@@ -1797,7 +1807,7 @@ def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None, centers=None)
     halo = [pe.withStroke(linewidth=2.5, foreground="white")]
     for x, y, letter, value, color in centers or []:
         ax.text(x, y, letter, color=color, fontsize=22, fontweight="bold", ha="center", va="center", path_effects=halo)
-        ax.text(x, y + 19, value, color=color, fontsize=9, fontweight="bold", ha="center", va="center", path_effects=halo)
+        ax.text(x, y + 21, value, color=color, fontsize=11, fontweight="bold", ha="center", va="center", path_effects=halo)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", transparent=True, dpi=100)
     buf.seek(0)
@@ -1856,7 +1866,8 @@ def draw(fields, h):
     if "w100" in fields:
         out["wind100"] = picture(ar, fill(fields["w100"], "wind100"))
     if "ptype" in fields:
-        out["ptype"] = ptype_pic(ar, fields["ptype"], fields.get("prate"), fields["msl"], fields.get("thick"))
+        # Extra smoothing: the global models' sea-level pressure squiggles over the Rockies.
+        out["ptype"] = ptype_pic(ar, fields["ptype"], fields.get("prate"), fields["msl"], fields.get("thick"), n=12)
     out["mslp"] = mslp_pic(ar, fields["msl"], fields.get("u10kt"), fields.get("v10kt"), 6)
     if "shr_u" in fields:
         out["shear"] = shear_pic(ar, fields["shr_u"], fields["shr_v"], "shear5")
