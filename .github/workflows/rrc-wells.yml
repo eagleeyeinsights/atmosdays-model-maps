@@ -10,13 +10,11 @@ name: Texas well index (Railroad Commission)
 # Only the schedule and the owner's "Run workflow" button start this job.
 on:
   schedule:
-    # Four tries a day, each on a new GitHub computer. The RRC file site sometimes
-    # hangs up on GitHub's computers for a while; a later try usually gets through.
-    # A try does nothing once the day's index is built.
+    # Twice a day. The RRC file site turns some GitHub computers away every time and
+    # lets others in, so each run tries up to 6 computers in turn (see the wells job).
+    # A run does nothing once the day's index is built.
     - cron: '35 9 * * *'    # 3:35 or 4:35 AM Central, after the RRC's evening refresh
-    - cron: '35 13 * * *'
-    - cron: '35 17 * * *'
-    - cron: '35 21 * * *'   # the day's last try: fails if there is still no index
+    - cron: '35 21 * * *'
   workflow_dispatch:
     inputs:
       test_only:
@@ -61,9 +59,21 @@ jobs:
         run: echo | timeout 20 openssl s_client -connect mft.rrc.texas.gov:443 -servername mft.rrc.texas.gov -brief 2>&1 | head -15 || true
 
   wells:
+    # The RRC file site hangs up on some GitHub computers right after the secure
+    # greeting, every time, and lets others in (checked 2026-11-22: 2 of 4). So the
+    # job runs on up to 6 computers, one after another. A computer that's turned
+    # away stops within seconds and the next one tries; once one has built the
+    # index, the rest see it's fresh and do nothing. A real failure stops the rest.
+    # Red only for a real failure, or an RRC outage with a website index over 4 days old.
     if: github.repository == 'eagleeyeinsights/atmosdays-model-maps' && !inputs.diagnose
+    name: wells (computer ${{ matrix.computer }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        computer: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,16 +88,16 @@ jobs:
         env:
           MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
           MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
-          # Scheduled tries skip once today's index is built. Only the last one may fail
-          # because the website has no index yet; a stale index always fails.
-          EXTRA: ${{ github.event_name == 'schedule' && format('--skip-if-fresh 20{0}', github.event.schedule != '35 21 * * *' && ' --not-last-try' || '') || '' }}
-        run: python wells/rrc_wells.py --upload $EXTRA
+          # Scheduled runs skip once today's index is built; computers 2-6 of a
+          # manual run skip once an earlier computer has built it.
+          SKIP: ${{ github.event_name == 'schedule' && '--skip-if-fresh 20' || (matrix.computer > 1 && '--skip-if-fresh 3' || '') }}
+        run: python wells/rrc_wells.py --upload --computer ${{ matrix.computer }}/6 $SKIP
       - name: Test build (Anderson, Karnes, Loving, Reeves, Zavala; nothing uploaded)
         if: ${{ inputs.test_only }}
-        run: python wells/rrc_wells.py --out out --counties 001,255,301,389,507
+        run: python wells/rrc_wells.py --out out --counties 001,255,301,389,507 --computer ${{ matrix.computer }}/6
       - uses: actions/upload-artifact@v4
-        if: ${{ inputs.test_only }}
+        if: ${{ inputs.test_only && hashFiles('out/**') != '' }}
         with:
-          name: wells-test
+          name: wells-test-computer-${{ matrix.computer }}
           path: out
           retention-days: 3
