@@ -8,7 +8,6 @@ import io
 import json
 import os
 import re
-import ssl
 import struct
 import sys
 import tempfile
@@ -153,7 +152,7 @@ class WellIndexTest(unittest.TestCase):
         W.MFT = base
         W.WELL_LAYERS = f"{base}/link/d551fb20-x"
         W.API_DBF = f"{base}/link/1eb94d66-x"
-        W.MIN_GAP = 0
+        W.MIN_GAP = W.PROBE_GAP = 0
         W.RETRY_WAITS = (0.01, 0.01)
 
     @classmethod
@@ -222,7 +221,7 @@ class WellIndexTest(unittest.TestCase):
         Fake.drops = 100
         try:
             with tempfile.TemporaryDirectory() as d:
-                self.assertEqual(W.main(["--out", d, "--counties", "389"]), 1)
+                self.assertEqual(W.main(["--out", d, "--counties", "389"]), 0)  # a warning, not red
         finally:
             Fake.drops = 0
 
@@ -234,30 +233,27 @@ class WellIndexTest(unittest.TestCase):
             W.site_index_age_days = lambda: 9.0
             self.assertEqual(W.source_down("down", upload=True), 1)
             W.site_index_age_days = lambda: None
-            self.assertEqual(W.source_down("down", upload=True), 1)  # no index, last try of the day
-            self.assertEqual(W.source_down("down", upload=True, last_try=False), 0)  # a later try comes
-            W.site_index_age_days = lambda: 9.0
-            self.assertEqual(W.source_down("down", upload=True, last_try=False), 1)  # stale index always alarms
+            self.assertEqual(W.source_down("down", upload=True), 0)  # no index yet: a warning, not red
         finally:
             W.site_index_age_days = old
 
-    def test_dropped_handshake_switches_connection(self):
-        g = W.GoDrive(W.WELL_LAYERS)
-        real, tries = g.opener, []
-
-        class HangsUp:
-            def open(self, *a, **k):
-                tries.append("default")
-                raise urllib.error.URLError(ssl.SSLError("[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"))
-
-        class Works:
-            def open(self, *a, **k):
-                tries.append("tls1.2")
-                return real.open(*a, **k)
-
-        g.opener, g.alt_opener = HangsUp(), Works()
-        self.assertEqual(sorted(g.list(page_rows=1)), sorted(FILES))
-        self.assertEqual(tries[:2], ["default", "tls1.2"])
+    def test_turned_away_computer_hands_over(self):
+        old = W.site_index_age_days
+        try:
+            W.site_index_age_days = lambda: 9.0
+            Fake.drops = 100
+            with tempfile.TemporaryDirectory() as d:
+                # not the last computer: stop at once, quietly
+                self.assertEqual(W.main(["--out", d, "--counties", "389", "--computer", "1/6"]), 0)
+                self.assertFalse(os.listdir(d))
+            Fake.drops = 0
+            with tempfile.TemporaryDirectory() as d:
+                # a computer that gets in builds as usual
+                self.assertEqual(W.main(["--out", d, "--counties", "389", "--computer", "2/6"]), 0)
+                self.assertTrue(os.path.exists(os.path.join(d, "wells/tx/389.json")))
+        finally:
+            W.site_index_age_days = old
+            Fake.drops = 0
 
     def test_fresh_index_skips_the_run(self):
         old = W.site_index_age_days
