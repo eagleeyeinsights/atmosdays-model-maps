@@ -70,3 +70,15 @@ the hurricane page: spaghetti model tracks (NHC ATCF a-deck, newest run of each 
 the storm's 6-hourly best track (b-deck) and Hurricane Hunter observations and center
 fixes (NHC recon archive). Standard library only. `python tropics.py --test` prints a
 summary; `--recon-sample N` reads the newest N recon files however old (for testing).
+
+## Model-blend rain chance (`blend/nbm_chance.py`)
+
+Every hour (`.github/workflows/blend-chance.yml`) this takes the newest NOAA National
+Blend of Models run that reaches 7 days and keeps its chance of at least 0.01 inch of
+rain or melted snow (the same measure as the NWS "chance of precipitation") for every
+6- and 12-hour window ending at 00, 06, 12 and 18 UTC. It goes on a 0.06-degree grid
+as one ~29 MB file of uint8 percents (`blend/nbm/{a,b}.bin`, taking turns) plus
+`blend/nbm/latest.json`. The website reads one spot with a 56-byte ranged read and shows
+this "model blend" chance next to the NWS one. `--test` prints Midland, Dallas, Denver
+and Seattle; `--run YYYYMMDDHH` builds an older run. Checked against NOAA's own NBS
+station text for KMAF (11/22 00Z: 24% for Tue 12-18Z, both).
