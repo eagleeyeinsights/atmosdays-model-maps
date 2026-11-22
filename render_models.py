@@ -81,7 +81,11 @@ WIND_STOPS = [[5, "#d8ecf3"], [10, "#9fd3e6"], [20, "#5ab4d6"], [30, "#3b8f4f"],
 
 # Jet stream speed in knots, the unit weather maps use for winds aloft. Goes past
 # 200 kt so a strong winter jet still shows its fastest core.
-JET_STOPS = [[50, "#d6ebff"], [70, "#8fc4ff"], [90, "#4f8ff0"], [110, "#7b4fe0"], [130, "#c43fc4"], [150, "#ff6fae"], [170, "#fb7185"], [190, "#f59e0b"], [210, "#fde047"]]
+# Jet stream colors in NOAA's steps (its official 250 mb map at mag.ncep.noaa.gov): nothing
+# under 70 knots, then 70-90 light blue, 90-110 blue, 110-130 purple, 130-150 magenta,
+# 150+ red, with orange and yellow for the rare 190+ cores.
+JET_STOPS = [[70, "#7dd3fc"], [90, "#2f7fe0"], [110, "#6d28d9"], [130, "#c026d3"], [150, "#dc2626"],
+             [190, "#f59e0b"], [210, "#fde047"]]
 
 LEGENDS = {
     "temp": {"label": "Temperature", "unit": "°F", "stops": [
@@ -94,7 +98,7 @@ LEGENDS = {
     "wind": {"label": "Wind at 10 m", "unit": "mph", "stops": [
         [5, "#d8ecf3"], [10, "#9fd3e6"], [20, "#5ab4d6"], [30, "#3b8f4f"], [40, "#e8d54a"], [50, "#f08a2a"],
         [60, "#d7301f"], [75, "#8c1d6e"]]},
-    "upper": {"label": "Jet stream (250 mb wind, about 34,000 ft)", "unit": "kt", "stops": JET_STOPS,
+    "upper": {"label": "Jet stream (250 mb wind, about 34,000 ft)", "unit": "kt", "steps": True, "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Lines: 250 mb height, dam"},
     "radar": {"label": "Computer radar (what the model expects radar to show)", "unit": "dBZ", "steps": True, "stops": [
         [5, "#9be7f5"], [10, "#3fb7ee"], [15, "#2b6fe0"], [20, "#36d33a"], [25, "#20a72b"], [30, "#147a1d"],
@@ -129,18 +133,20 @@ LEGENDS = {
         [3.0, "#4c1d95"]], "note": "1 inch (quarter size) and up is severe"},
     "ltng": {"label": "Lightning", "unit": "flashes/km² per 5 min", "stops": [
         [0.05, "#fef9c3"], [0.25, "#fde047"], [0.5, "#f59e0b"], [1, "#ef4444"], [2, "#b91c1c"], [4, "#7e22ce"]]},
+    # Pivotal Weather's 500 mb wind colors, read off its color bar (2026-11-22).
     "wind500": {"label": "500 mb wind (about 18,000 ft): the storm track", "unit": "kt", "stops": [
-        [20, "#e0f2fe"], [30, "#bae6fd"], [40, "#7dd3fc"], [50, "#38bdf8"], [60, "#3b82f6"], [70, "#6366f1"], [80, "#8b5cf6"],
-        [90, "#c026d3"], [100, "#db2777"], [120, "#f43f5e"], [140, "#f59e0b"]],
-        "note": "Lines: 500 mb height, dam. Barbs: wind in knots"},
-    "jet200": {"label": "200 mb wind (about 39,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
+        [20, "#e8f4fe"], [25, "#c6e7fd"], [30, "#92d2fb"], [35, "#7ba0e8"], [40, "#6d66d2"], [45, "#9c72d2"], [50, "#da90db"],
+        [55, "#ad67a6"], [60, "#ad53a5"], [65, "#ab35a2"], [70, "#9c1493"], [75, "#b40a5f"], [80, "#c80028"], [90, "#dc283c"],
+        [100, "#f05050"], [105, "#f5a05a"], [110, "#d5cd58"], [120, "#c1a53e"], [130, "#bb8725"], [140, "#ac6e16"]],
+        "note": "Lines: 500 mb height every 3 dam. Barbs: wind in knots"},
+    "jet200": {"label": "200 mb wind (about 39,000 ft): the jet stream", "unit": "kt", "steps": True, "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Lines: 200 mb height, dam"},
-    "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
+    "jet300": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "steps": True, "stops": JET_STOPS,
         "note": "Barbs: wind in knots. Lines: 300 mb height, dam"},
-    "jet250": {"label": "250 mb wind (about 34,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
-        "note": "Barbs: wind in knots. Purple dashed lines: air spreading out aloft (divergence), which helps air rise below"},
-    "jet300d": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "stops": JET_STOPS,
-        "note": "Barbs: wind in knots. Purple dashed lines: air spreading out aloft (divergence), which helps air rise below"},
+    "jet250": {"label": "250 mb wind (about 34,000 ft): the jet stream", "unit": "kt", "steps": True, "stops": JET_STOPS,
+        "note": "Barbs: wind in knots. Lines: 250 mb height, dam"},
+    "jet300d": {"label": "300 mb wind (about 30,000 ft): the jet stream", "unit": "kt", "steps": True, "stops": JET_STOPS,
+        "note": "Barbs: wind in knots. Lines: 300 mb height, dam"},
     "mslp": {"label": "Sea-level pressure", "unit": "mb", "alpha": 110, "stops": [
         [984, "#7c3aed"], [996, "#60a5fa"], [1008, "#f1f5f9"], [1016, "#f1f5f9"], [1026, "#fca5a5"], [1036, "#dc2626"]],
         "note": "Lines every 2 mb. Barbs: wind at 33 ft, knots"},
@@ -243,12 +249,12 @@ FIELD_LEGEND = {"precip": "precip", "storms40": "prob", "rotation": "prob", "hea
                 "pop6": "chance", "tstm": "chance", "spread500": "spread", "ice6": "ice"}
 
 # Below these values the map stays see-through.
-FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (35, 50), "radar": (4, 6),
+FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (66, 70), "radar": (4, 6),
         "rain1": (0.005, 0.015), "rain6": (0.005, 0.02), "gust": (10, 20), "uh": (15, 30), "prob": (5, 12),
         "dew": None, "cape": (100, 300), "qpf": (0.005, 0.03), "snow": (0.05, 0.3), "hail": (0.2, 0.3), "ltng": (0.02, 0.08),
-        "jet200": (35, 50), "jet300": (35, 50), "wind500": (15, 22), "vort": (10, 14), "rh700": (60, 75), "t850": None,
+        "jet200": (66, 70), "jet300": (66, 70), "wind500": (15, 22), "vort": (10, 14), "rh700": (60, 75), "t850": None,
         "mlcape": (100, 300), "cin": (15, 35), "shear6": (15, 25), "srh1": (40, 80), "lapse": (5.8, 6.3), "pwat": None,
-        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (35, 50), "jet300d": (35, 50), "mslp": None,
+        "stp": (0.2, 0.6), "scp": (0.5, 1.2), "jet250": (66, 70), "jet300d": (66, 70), "mslp": None,
         "shear1": (8, 14), "shear5": (15, 25),
         "chance": (5, 12), "spread": (5, 12), "smoke": (3, 8), "ptype": (0.5, 0.6), "snow6": (0.05, 0.2),
         "ice": (0.005, 0.01), "sky": (5, 30), "wind80": (5, 15), "wind100": (5, 15),
@@ -262,8 +268,8 @@ FADE = {"temp": None, "precip": (0.005, 0.02), "wind": (5, 15), "upper": (35, 50
 # stop (rain 0.1, 0.25, 0.5 inch ...).
 BANDS = {
     "temp": 2, "dew": 2, "t850": 1, "t3h": 1, "td3h": 1,
-    "wind": 5, "gust": 5, "wind80": 5, "wind100": 5, "upper": 10, "jet200": 10, "jet250": 10, "jet300": 10,
-    "jet300d": 10, "wind500": 10, "shear1": 5, "shear5": 5, "shear6": 5,
+    "wind": 5, "gust": 5, "wind80": 5, "wind100": 5, "upper": "stops", "jet200": "stops", "jet250": "stops", "jet300": "stops",
+    "jet300d": "stops", "wind500": 5, "shear1": 5, "shear5": 5, "shear6": 5,
     "cape": 250, "mlcape": 250, "cape3h": 250, "cin": 25, "srh1": 25, "lapse": 0.25, "pwat": 0.1,
     "vort": 2, "rh700": 5, "spread": 5, "sky": 10, "stp": 0.5, "scp": 1, "mslp": 2,
     **{k: "stops" for k in ("precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice", "hail", "ltng", "uh",
@@ -937,6 +943,13 @@ def hrrr_fields(run, h):
     }
     spans = idx_spans(get(hrrr_url(run, h) + ".idx").decode(), want)
     raw = ranges_get(hrrr_url(run, h), spans)
+    # The 250 and 300 mb heights for the jet stream maps are only in the pressure-level file.
+    try:
+        purl = snd_url("hrrr", run, h)
+        zs = {f"z{p}": (lambda lvl: lambda v, lv, f, r: v == "HGT" and lv == lvl)(f"{p} mb") for p in (250, 300)}
+        raw.update(ranges_get(purl, idx_spans(get(purl + ".idx").decode(), zs)))
+    except Exception as e:  # noqa: BLE001  the jet maps just go without height lines
+        print(f"  hrrr +{h}h 250/300 mb heights not available: {e!r}", flush=True)
     ar = area("conus")
     grids = {k: decode(v) for k, v in raw.items()}
     pts = None
@@ -979,6 +992,7 @@ def hrrr_fields(run, h):
         "z500": g["z500"] / 10 if "z500" in g else None, "z700": g["z700"] / 10 if "z700" in g else None,
         "z850": g["z850"] / 10 if "z850" in g else None, "t850": g["t850"] - 273.15 if "t850" in g else None,
         "rh700": rh_from(g["t700"], g["d700"]) if "t700" in g and "d700" in g else None,
+        "z250": g["z250"] / 10 if "z250" in g else None, "z300": g["z300"] / 10 if "z300" in g else None,
     }
 
 
@@ -1219,7 +1233,7 @@ def rrfs_fields(run, h):
     upper = {
         **{f"{c}{p}": (lambda var, lvl: lambda v, lv, f, r: v == var and lv == lvl)({"u": "UGRD", "v": "VGRD"}[c], f"{p} mb")
            for c in "uv" for p in (250, 300, 500, 700, 850)},
-        **{f"z{p}": (lambda lvl: lambda v, lv, f, r: v == "HGT" and lv == lvl)(f"{p} mb") for p in (500, 700, 850)},
+        **{f"z{p}": (lambda lvl: lambda v, lv, f, r: v == "HGT" and lv == lvl)(f"{p} mb") for p in (250, 300, 500, 700, 850)},
         "t500": lambda v, lv, f, r: v == "TMP" and lv == "500 mb",
         "t700": lambda v, lv, f, r: v == "TMP" and lv == "700 mb",
         "d700": lambda v, lv, f, r: v == "DPT" and lv == "700 mb",
@@ -1264,6 +1278,7 @@ def rrfs_fields(run, h):
         "z500": g["z500"] / 10 if "z500" in g else None, "z700": g["z700"] / 10 if "z700" in g else None,
         "z850": g["z850"] / 10 if "z850" in g else None, "t850": g["t850"] - 273.15 if "t850" in g else None,
         "rh700": rh_from(g["t700"], g["d700"]) if "t700" in g and "d700" in g else None,
+        "z250": g["z250"] / 10 if "z250" in g else None, "z300": g["z300"] / 10 if "z300" in g else None,
     }
 
 
@@ -1877,16 +1892,13 @@ def draw(fields, h):
 
 BARB_GAP = 46  # pixels between wind barbs
 Z250_LEVELS = np.arange(900, 1140, 12)  # 250 mb height lines, dam
+Z300_LEVELS = np.arange(840, 1000, 12)
 
 
 def upper_pic(ar, f):
     """Jet stream: 250 mb wind (kt) with barbs and 250 mb height lines (500 mb if a run lacks 250)."""
-    if f.get("z250") is not None:
-        lines = [(smooth(f["z250"], 3), Z250_LEVELS, "#111827", 1.0, True, False)]
-    else:
-        lines = [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.0, True, False)]
-    b = f.get("b250")
-    return picture(ar, colorize(f["w250"], "upper"), lines, barbs=(b[0], b[1], BARB_GAP, "#111827") if b else None)
+    u, v = f["b250"]
+    return jet_map(ar, u, v, "upper", f.get("z250"), Z250_LEVELS)
 
 
 def mslp_pic(ar, msl, u, v, n):
@@ -1900,15 +1912,23 @@ def shear_pic(ar, u, v, legend):
     return picture(ar, colorize(np.hypot(u, v), legend), barbs=(u, v, BARB_GAP, "#111827"))
 
 
+JET_BARB_GAP = 64  # jet maps: fewer barbs so the wind colors and height lines read
+
+
+def jet_map(ar, u, v, legend, z=None, zlevels=None, n=3):
+    """One look for every jet stream map (all models, 200/250/300 mb), like the 250 mb maps
+    on Pivotal Weather: wind speed colored from 50 knots up, the level's height lines
+    (dam, labeled) and wind barbs in knots. The storm models (3 km) are smoothed a bit more."""
+    lines = [(smooth(z, n), zlevels, "#111827", 1.0, True, False)] if z is not None else []
+    speed = np.hypot(u, v)
+    if n > 3:
+        speed = smooth(speed, 2)
+    return picture(ar, colorize(speed, legend), lines, barbs=(u, v, JET_BARB_GAP, "#1f2937"))
+
+
 def jet_pic(ar, u, v, legend, z=None, zlevels=None):
-    """Jet stream: wind speed colors (kt), barbs (knots) and upper-level divergence lines."""
-    # The 3 km HRRR is noisy aloft; smooth to about 100 km so only the jet-scale pattern shows.
-    su, sv = smooth(smooth(u, 24), 24), smooth(smooth(v, 24), 24)
-    div, _ = kinematics(su / KT, sv / KT, ar)
-    lines = [(smooth(div * 1e5, 10), [2, 3, 4, 6, 8], "#7e22ce", 1.0, True, True)]
-    if z is not None:
-        lines.append((smooth(z, 3), zlevels, "#111827", 1.0, True, False))
-    return picture(ar, colorize(np.hypot(u, v), legend), lines, barbs=(u, v, BARB_GAP, "#111827"))
+    """Storm-model (HRRR, RRFS) jet stream map."""
+    return jet_map(ar, u, v, legend, z, zlevels, n=10)
 
 
 def draw_hrrr_upper(ar, f):
@@ -1917,11 +1937,12 @@ def draw_hrrr_upper(ar, f):
     out = {}
     black, bar = "#111827", lambda k: (w[k][0], w[k][1], BARB_GAP, black) if k in w else None
     if "u250" in w:
-        out["jet250"] = jet_pic(ar, *w["u250"], "jet250")
+        out["jet250"] = jet_pic(ar, *w["u250"], "jet250", f.get("z250"), Z250_LEVELS)
     if "u300" in w:
-        out["jet300"] = jet_pic(ar, *w["u300"], "jet300d")
+        out["jet300"] = jet_pic(ar, *w["u300"], "jet300d", f.get("z300"), Z300_LEVELS)
     if "u500" in w and f.get("z500") is not None:
         u, v = w["u500"]
+        out["h500w"] = h500w_pic(ar, {"w500": np.hypot(u, v), "b500": (u, v), "z500": f["z500"]}, n=10)
         _, vort = kinematics(smooth(smooth(u, 8), 8) / KT, smooth(smooth(v, 8), 8) / KT, ar)
         av = (vort + coriolis(ar)) * 1e5
         out["h500"] = picture(ar, colorize(smooth(av, 3), "vort"), [(smooth(f["z500"], 4), np.arange(480, 612, 6), black, 1.0, True, False)], barbs=bar("u500"))
@@ -1933,10 +1954,12 @@ def draw_hrrr_upper(ar, f):
     return out
 
 
-def h500w_pic(ar, f):
-    """500 mb heights (dam) with wind speed shading and barbs (kt): the classic upper-air map."""
-    z = [(smooth(f["z500"], 3), np.arange(480, 612, 6), "#111827", 1.1, True, False)]
-    return picture(ar, colorize(f["w500"], "wind500"), z, barbs=(*f["b500"], BARB_GAP, "#111827"))
+def h500w_pic(ar, f, n=3):
+    """500 mb heights with wind speed shading and barbs (kt), drawn like Pivotal Weather's
+    500 mb map: its colors, a height line every 3 dam (labeled), thin gray barbs."""
+    speed = f["w500"] if n <= 3 else smooth(f["w500"], 2)
+    z = [(smooth(f["z500"], n), np.arange(480, 612, 3), "#111827", 0.8, True, False)]
+    return picture(ar, colorize(speed, "wind500"), z, barbs=(*f["b500"], JET_BARB_GAP, "#374151"))
 
 
 def draw_upper(ar, f):
@@ -1946,10 +1969,8 @@ def draw_upper(ar, f):
     black = "#111827"
     bar = lambda k: (*f[k], BARB_GAP, black) if f.get(k) is not None else None  # noqa: E731
     return {
-        "h200": picture(ar, colorize(f["w200"], "jet200"), [(smooth(f["z200"], 3), np.arange(1080, 1290, 12), black, 1.0, True, False)],
-                        barbs=(*f["b200"], BARB_GAP, black)),
-        "h300": picture(ar, colorize(f["w300"], "jet300"), [(smooth(f["z300"], 3), np.arange(840, 1000, 12), black, 1.0, True, False)],
-                        barbs=(*f["b300"], BARB_GAP, black)),
+        "h200": jet_map(ar, *f["b200"], "jet200", f["z200"], np.arange(1080, 1290, 12)),
+        "h300": jet_map(ar, *f["b300"], "jet300", f["z300"], Z300_LEVELS),
         **({"h500w": h500w_pic(ar, f)} if "w500" in f else {}),
         "h500": picture(ar, colorize(smooth(f["av500"], 2), "vort"), [(smooth(f["z500"], 3), np.arange(480, 612, 6), black, 1.0, True, False)]),
         "h700": picture(ar, colorize(f["rh700"], "rh700"), [(smooth(f["z700"], 3), np.arange(240, 336, 3), black, 0.9, True, False)],
@@ -2366,7 +2387,7 @@ HRRR_MESO = ["mlcape", "cin", "shear6", "shear1", "srh1", "lapse", "pwat", "stp"
 # The storm models (HRRR and RRFS) share one list of maps, and the big global models
 # (GFS, ECMWF and the two AI models) share another, so switching models keeps the
 # same maps wherever the free data has them.
-STORM_FULL = ["radar", "ptype", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng", "smoke"] + HRRR_MESO
+STORM_FULL = ["radar", "ptype", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng", "smoke", "h500w"] + HRRR_MESO
 GLOBAL_FULL = FIELDS + ["ptype", "dew", "cape", "qpf", "snow", "gust", "wind100", "mslp", "shear"] + UPPER_MAPS
 
 # One order for every model's map list (the first is the one a model opens on: what's
