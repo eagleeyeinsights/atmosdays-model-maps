@@ -211,7 +211,7 @@ LEGENDS = {
 
 # Picture name -> label for the map list on the page.
 FIELD_NAMES = {
-    "temp": "Temperature", "precip": "Rain and snow, with pressure", "wind": "Wind", "upper": "Jet stream (250 mb)",
+    "temp": "Temperature", "precip": "Rain and snow, with pressure", "wind": "Wind", "upper": "250 mb: jet stream (34,000 ft)",
     "radar": "Computer radar", "rain1": "Rain, 1 hour", "rain6": "Rain, 6 hours", "gust": "Wind gusts",
     "uh": "Storm rotation tracks", "storms40": "Chance of strong storms", "rotation": "Chance of rotating storms",
     "heavy": "Chance of 1 inch of rain in 3 hours",
@@ -348,14 +348,15 @@ class Grid:
     def __init__(self, values, lat0, dlat, lon0, dlon):
         self.values, self.lat0, self.dlat, self.lon0, self.dlon = values, lat0, dlat, lon0, dlon
 
-    def sample(self, ar):
+    def sample(self, ar, order=1):
+        """order 1 blends neighbors; order 0 takes the nearest (for type codes, which can't be blended)."""
         lon = ar.lons.copy()
         if self.lon0 >= 0:
             lon = np.where(lon < 0, lon + 360, lon)
         rows = (ar.lats - self.lat0) / self.dlat
         cols = (lon - self.lon0) / self.dlon
         rr, cc = np.meshgrid(rows, cols, indexing="ij")
-        return map_coordinates(self.values, [rr, cc], order=1, mode="nearest")
+        return map_coordinates(self.values, [rr, cc], order=order, mode="nearest")
 
 
 class LambertGrid:
@@ -592,6 +593,11 @@ GFS_WANT = {
     "z200": "HGT:200 mb:", "u200": "UGRD:200 mb:", "v200": "VGRD:200 mb:",
     "z300": "HGT:300 mb:", "u300": "UGRD:300 mb:", "v300": "VGRD:300 mb:", "av500": "ABSV:500 mb:",
     "z700": "HGT:700 mb:", "rh700": "RH:700 mb:", "z850": "HGT:850 mb:", "t850": "TMP:850 mb:",
+    # Gusts and wind at 100 m (330 ft, wind-farm hub height), like the other big models.
+    "gust": "GUST:surface:", "u100": "UGRD:100 m above ground:", "v100": "VGRD:100 m above ground:",
+    # Rain, snow, sleet or freezing rain right at the map time (the first listing; the
+    # 6-hour averages come after it).
+    "crain": "CRAIN:surface:", "csnow": "CSNOW:surface:", "cicep": "CICEP:surface:", "cfrzr": "CFRZR:surface:",
 }
 
 
@@ -640,8 +646,41 @@ def gfs_fields(run, h):
         "qpf": g["tpt"] / 25.4 if "tpt" in g else None,
         **surface_wind(g),
         **upper_air(g, lambda: g["av500"] * 1e5),
+        "gust": g["gust"] * 2.23694 if "gust" in g else None,
+        "w100": np.hypot(g["u100"], g["v100"]) * 2.23694 if "u100" in g and "v100" in g else None,
+        "snow": gfs_snow_total(run, h) if h >= 6 else None,
+        "ptype": ptype_from(g) if h > 0 else None,
     }
     return out
+
+
+_gfs_snow = {}
+
+
+def gfs_snow6(run, h):
+    """10:1 snowfall (inches) in the 6 hours ending at hour h: the rain-and-melted-snow
+    amount times the share of those 6 hours GFS calls it snow, times 10. The GFS files
+    have no snowfall total of their own (ECMWF and the storm models do)."""
+    win = f"{h - 6}-{h} hour"
+    want = {"tp6": lambda v, lv, f, r: v == "APCP" and lv == "surface" and f == f"{win} acc fcst",
+            "csnow": lambda v, lv, f, r: v == "CSNOW" and lv == "surface" and f == f"{win} ave fcst"}
+    spans = idx_spans(get(gfs_url(run, h) + ".idx").decode(), want)
+    if len(spans) < 2:
+        raise KeyError(f"GFS +{h}h has no 6-hour rain or snow share")
+    g = {k: decode(v).sample(area("na")) for k, v in ranges_get(gfs_url(run, h), spans).items()}
+    return (g["tp6"] / 25.4 * np.clip(g["csnow"], 0, 1) * 10).astype(np.float32)
+
+
+def gfs_snow_total(run, h):
+    """10:1 snowfall since the run started (inches), adding up the 6-hour pieces."""
+    if h < 6:
+        return None
+    key = (run, h)
+    if key not in _gfs_snow:
+        before = gfs_snow_total(run, h - 6)
+        piece = gfs_snow6(run, h)
+        _gfs_snow[key] = piece if before is None else before + piece
+    return _gfs_snow[key]
 
 
 KT = 1.94384  # m/s -> knots
@@ -692,7 +731,19 @@ EC_WANT = {("2t", None): "t2", ("msl", None): "msl", ("10u", None): "u10", ("10v
            ("2d", None): "d2", ("mucape", None): "cape", ("sf", None): "sf",
            ("gh", "200"): "z200", ("u", "200"): "u200", ("v", "200"): "v200", ("gh", "300"): "z300", ("u", "300"): "u300",
            ("v", "300"): "v300", ("vo", "500"): "vo500", ("gh", "700"): "z700", ("r", "700"): "rh700", ("gh", "850"): "z850",
-           ("t", "850"): "t850", ("u", "500"): "u500", ("v", "500"): "v500"}
+           ("t", "850"): "t850", ("u", "500"): "u500", ("v", "500"): "v500",
+           # Gusts (the strongest in the last few hours) and wind at 100 m (330 ft).
+           ("10fg", None): "gust", ("100u", None): "u100", ("100v", None): "v100", ("ptype", None): "ptype"}
+# ECMWF precipitation type codes -> our 1 rain, 2 snow, 3 sleet or mix, 4 freezing rain.
+EC_PTYPE = {1: 1, 5: 2, 6: 2, 7: 3, 8: 3, 3: 4, 12: 4}
+
+
+def ec_ptype(code):
+    out = np.full(code.shape, np.nan)
+    c = np.rint(code)
+    for k, v in EC_PTYPE.items():
+        out = np.where(c == k, v, out)
+    return out
 
 
 def ec_url(run, h, src="ifs"):
@@ -754,7 +805,7 @@ def ec_grids(run, h, src, want):
             spans[name] = (r["_offset"], r["_offset"] + r["_length"] - 1)
     raw = ranges_get(ec_url(run, h, src) + ".grib2", spans, fetch=ec_get)
     ar = area("na")
-    return {k: decode(v).sample(ar) for k, v in raw.items()}
+    return {k: decode(v).sample(ar, order=0 if k == "ptype" else 1) for k, v in raw.items()}
 
 
 def ec_tp6(run, h, src="ifs"):
@@ -778,6 +829,9 @@ def ec_fields(run, h):
         "qpf": ec_tp(run, h) if h >= 6 else None,
         # Snowfall comes as meters of melted water; 10 inches of snow per inch of water.
         "snow": g["sf"] * 39.37 * 10 if h >= 6 and "sf" in g else None,
+        "gust": g["gust"] * 2.23694 if h >= 3 and "gust" in g else None,
+        "ptype": ec_ptype(g["ptype"]) if h > 0 and "ptype" in g else None,
+        "w100": np.hypot(g["u100"], g["v100"]) * 2.23694 if "u100" in g and "v100" in g else None,
         **surface_wind(g),
         # ECMWF gives relative vorticity; add the Earth's spin to match GFS's absolute vorticity.
         **upper_air(g, lambda: (g["vo500"] + coriolis(area("na"))) * 1e5),
@@ -852,6 +906,9 @@ def hrrr_fields(run, h):
         "z850": lambda v, lv, f, r: v == "HGT" and lv == "850 mb",
         "t850": lambda v, lv, f, r: v == "TMP" and lv == "850 mb",
         "d700": lambda v, lv, f, r: v == "DPT" and lv == "700 mb",
+        # Wildfire smoke 8 m above the ground and rain/snow/sleet/freezing rain, like the RRFS maps.
+        "smoke": lambda v, lv, f, r: v == "MASSDEN" and lv == "8 m above ground" and "ave" not in f,
+        **PTYPE_WANT,
     }
     spans = idx_spans(get(hrrr_url(run, h) + ".idx").decode(), want)
     raw = ranges_get(hrrr_url(run, h), spans)
@@ -888,6 +945,8 @@ def hrrr_fields(run, h):
         "snow": g["snow"] * 39.37 if "snow" in g else None,  # m -> in
         "hail": g["hail"] * 39.37 if "hail" in g else None,  # m -> in
         "ltng": g.get("ltng"),
+        "smoke": g["smoke"] * 1e9 if "smoke" in g else None,  # kg/m3 -> micrograms/m3
+        "ptype": ptype_from(g),
         "pts": pts,
         "meso": meso_fields(g),
         "change": change,
@@ -1114,23 +1173,60 @@ def rrfs_fields(run, h):
                                        and "ave" not in f,
         **{k: (lambda name: lambda v, lv, f, r: v == name and lv == "surface" and f.endswith(" fcst") and "-" not in f)(k.upper())
            for k in ("crain", "csnow", "cicep", "cfrzr")},
+        # Lightning and the storm ingredients, the same ones the HRRR maps use.
+        "ltng": lambda v, lv, f, r: h >= 1 and v == "LTNG" and lv == "entire atmosphere" and f == f"{win} max fcst",
+        "mlcape": lambda v, lv, f, r: v == "CAPE" and lv == "90-0 mb above ground",
+        "mlcin": lambda v, lv, f, r: v == "CIN" and lv == "90-0 mb above ground",
+        "mucape": lambda v, lv, f, r: v == "CAPE" and lv == "255-0 mb above ground",
+        "srh1": lambda v, lv, f, r: v == "HLCY" and lv == "1000-0 m above ground",
+        "srh3": lambda v, lv, f, r: v == "HLCY" and lv == "3000-0 m above ground",
+        "shu": lambda v, lv, f, r: v == "VUCSH" and lv == "0-6000 m above ground",
+        "shv": lambda v, lv, f, r: v == "VVCSH" and lv == "0-6000 m above ground",
+        "sh1u": lambda v, lv, f, r: v == "VUCSH" and lv == "0-1000 m above ground",
+        "sh1v": lambda v, lv, f, r: v == "VVCSH" and lv == "0-1000 m above ground",
+        "lcl": lambda v, lv, f, r: v == "HGT" and lv == "level of adiabatic condensation from sfc",
+        "pwat": lambda v, lv, f, r: v == "PWAT" and lv.startswith("entire atmosphere"),
     }
     spans = idx_spans(get(rrfs_url(run, h) + ".idx").decode(), want)
     raw = ranges_get(rrfs_url(run, h), spans)
+    # The jet stream and the 500, 700 and 850 mb maps come from the pressure-level file
+    # (the 2-D file the other maps use has no upper air; that is why RRFS had no jet map).
+    upper = {
+        **{f"{c}{p}": (lambda var, lvl: lambda v, lv, f, r: v == var and lv == lvl)({"u": "UGRD", "v": "VGRD"}[c], f"{p} mb")
+           for c in "uv" for p in (250, 300, 500, 700, 850)},
+        **{f"z{p}": (lambda lvl: lambda v, lv, f, r: v == "HGT" and lv == lvl)(f"{p} mb") for p in (500, 700, 850)},
+        "t500": lambda v, lv, f, r: v == "TMP" and lv == "500 mb",
+        "t700": lambda v, lv, f, r: v == "TMP" and lv == "700 mb",
+        "d700": lambda v, lv, f, r: v == "DPT" and lv == "700 mb",
+        "t850": lambda v, lv, f, r: v == "TMP" and lv == "850 mb",
+    }
+    try:
+        purl = snd_url("rrfs", run, h)
+        raw.update(ranges_get(purl, idx_spans(get(purl + ".idx").decode(), upper)))
+    except Exception as e:  # noqa: BLE001  the surface maps still go up without the upper air
+        print(f"  rrfs +{h}h upper air not available: {e!r}", flush=True)
     ar = area("conus")
     grids = {k: decode(v) for k, v in raw.items()}
     winds = {}
-    if "u10" in grids and "v10" in grids:
-        u, v = earth_wind(grids.pop("u10"), grids.pop("v10"), ar)
-        winds["u10"] = (u * KT, v * KT)
+    for a, b in (("u10", "v10"), ("shu", "shv"), ("sh1u", "sh1v"), *((f"u{p}", f"v{p}") for p in (250, 300, 500, 700, 850))):
+        if a in grids and b in grids:
+            u, v = earth_wind(grids.pop(a), grids.pop(b), ar)
+            winds[a] = (u * KT, v * KT)
     g = {k: v.sample(ar) for k, v in grids.items()}
     del grids
-    ptype = None
-    if all(k in g for k in ("crain", "csnow", "cicep", "cfrzr")):
-        # Worst type wins: freezing rain, then sleet, snow, rain. Blank where none falls.
-        ptype = np.full(g["crain"].shape, np.nan)
-        for k, code in (("crain", 1), ("csnow", 2), ("cicep", 3), ("cfrzr", 4)):
-            ptype = np.where(g[k] >= 0.5, code, ptype)
+    # meso_fields wants the 0-6 km shear components in m/s, as HRRR gives them.
+    if "shu" in winds:
+        g["shu"], g["shv"] = winds["shu"][0] / KT, winds["shu"][1] / KT
+    before = rrfs_before(run, h)
+    change = {}
+    if before:
+        if "t2" in before:
+            change["t3h"] = k_to_f(g["t2"]) - before["t2"]
+        if "d2" in before and "d2" in g:
+            change["td3h"] = k_to_f(g["d2"]) - before["d2"]
+        if "mlcape" in before and "mlcape" in g:
+            change["cape3h"] = g["mlcape"] - before["mlcape"]
+    ptype = ptype_from(g)
     return {
         "refc": g.get("refc"), "t2": k_to_f(g["t2"]), "d2": k_to_f(g["d2"]) if "d2" in g else None,
         "gust": g["gust"] * 2.23694 if "gust" in g else None, "msl": g["msl"] / 100 if "msl" in g else None,
@@ -1138,13 +1234,63 @@ def rrfs_fields(run, h):
         "qpf": g["tpt"] / 25.4 if "tpt" in g else None, "snow": g["snow"] * 39.37 if "snow" in g else None,
         "uh": g.get("uh"), "hail": g["hail"] * 39.37 if "hail" in g else None,
         "smoke": g["smoke"] * 1e9 if "smoke" in g else None,  # kg/m3 -> micrograms/m3
-        "ptype": ptype, "winds": winds,
+        "ptype": ptype, "winds": winds, "ltng": g.get("ltng"),
+        "meso": meso_fields(g), "change": change,
+        "z500": g["z500"] / 10 if "z500" in g else None, "z700": g["z700"] / 10 if "z700" in g else None,
+        "z850": g["z850"] / 10 if "z850" in g else None, "t850": g["t850"] - 273.15 if "t850" in g else None,
+        "rh700": rh_from(g["t700"], g["d700"]) if "t700" in g and "d700" in g else None,
     }
+
+
+PTYPE_WANT = {k: (lambda name: lambda v, lv, f, r: v == name and lv == "surface" and f.endswith(" fcst") and "-" not in f)(k.upper())
+              for k in ("crain", "csnow", "cicep", "cfrzr")}
+
+
+def ptype_from(g):
+    """Rain (1), snow (2), sleet (3) or freezing rain (4) from the yes/no type fields."""
+    if not all(k in g for k in ("crain", "csnow", "cicep", "cfrzr")):
+        return None
+    # Worst type wins: freezing rain, then sleet, snow, rain. Blank where none falls.
+    ptype = np.full(g["crain"].shape, np.nan)
+    for k, code in (("crain", 1), ("csnow", 2), ("cicep", 3), ("cfrzr", 4)):
+        ptype = np.where(g[k] >= 0.5, code, ptype)
+    return ptype
+
+
+def rrfs_before(run, h):
+    """Temperature, dew point (F) and MLCAPE three hours earlier in the same RRFS run
+    (the change maps start at hour 3)."""
+    if h < 3:
+        return None
+    want = {
+        "t2": lambda v, lv, f, r: v == "TMP" and lv == "2 m above ground",
+        "d2": lambda v, lv, f, r: v == "DPT" and lv == "2 m above ground",
+        "mlcape": lambda v, lv, f, r: v == "CAPE" and lv == "90-0 mb above ground",
+    }
+    try:
+        url = rrfs_url(run, h - 3)
+        raw = ranges_get(url, idx_spans(get(url + ".idx").decode(), want))
+    except Exception as e:  # noqa: BLE001  the change maps are just left out
+        print(f"  rrfs 3-hour change for +{h}h not available: {e!r}", flush=True)
+        return None
+    ar = area("conus")
+    out = {k: decode(v).sample(ar) for k, v in raw.items()}
+    for k in ("t2", "d2"):
+        if k in out:
+            out[k] = k_to_f(out[k])
+    return out
+
+
+def ptype_pic(ar, ptype):
+    return picture(ar, fill(ptype, "ptype"), sharp=True)
 
 
 def draw_rrfs(f, h):
     ar = area("conus")
     out = {
+        "ltng": picture(ar, fill(f.get("ltng"), "ltng")),
+        **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
+        **(draw_hrrr_extra(ar, f) if f["msl"] is not None else draw_hrrr_upper(ar, f)),
         "radar": picture(ar, fill(f["refc"], "radar"), sharp=True),
         "temp": temp_pic(ar, f["t2"]),
         "rain1": rain_pic(ar, f["tp1"], "rain1", f["msl"], 14),
@@ -1156,10 +1302,8 @@ def draw_rrfs(f, h):
         "snow": picture(ar, fill(f["snow"], "snow")),
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "smoke": picture(ar, fill(f["smoke"], "smoke")),
-        "ptype": picture(ar, fill(f["ptype"], "ptype"), sharp=True),
+        "ptype": ptype_pic(ar, f["ptype"]),
     }
-    if f["msl"] is not None and "u10" in f["winds"]:
-        out["mslp"] = mslp_pic(ar, f["msl"], *f["winds"]["u10"], 16)
     return out
 
 
@@ -1322,7 +1466,19 @@ def draw_nbm(f, h):
 # The AI models: NOAA's AIGFS (built on Google DeepMind's GraphCast, run and
 # published by NOAA) and ECMWF's AIFS. Both every 6 hours; 00 and 12 UTC runs.
 AI_HOURS = list(range(0, 361, 6))
-AI_MAPS = ["temp", "precip", "wind", "upper", "dew", "qpf", "mslp", "wind100"]
+AI_MAPS = ["temp", "precip", "wind", "upper", "dew", "qpf", "mslp", "wind100", "shear", "h200", "h300", "h500w", "h500",
+           "h700", "h850"]
+# Upper-air levels read from the AI models (both publish these 13 standard levels).
+AI_LEVELS = {"z": (200, 250, 300, 500, 700, 850), "u": (200, 250, 300, 500, 700, 850), "v": (200, 250, 300, 500, 700, 850),
+             "t": (700, 850), "q": (700,)}
+
+
+def rh_from_q(q, t_k, p_mb):
+    """Relative humidity (%) from specific humidity (kg/kg), temperature (K) and pressure (mb)."""
+    e = q * p_mb / (0.622 + 0.378 * q)
+    tc = t_k - 273.15
+    es = 6.112 * np.exp(17.67 * tc / (tc + 243.5))
+    return np.clip(100 * e / es, 0, 100)
 
 
 def aigfs_url(run, h, part):
@@ -1342,12 +1498,10 @@ def aigfs_fields(run, h):
         "tp6": lambda v, lv, f, r: h >= 6 and v == "APCP" and f == f"{hour_window(h, 6)} acc fcst",
         "tpt": lambda v, lv, f, r: h >= 6 and v == "APCP" and f in total,
     }
-    pres = {
-        "z500": lambda v, lv, f, r: v == "HGT" and lv == "500 mb",
-        "z250": lambda v, lv, f, r: v == "HGT" and lv == "250 mb",
-        "u250": lambda v, lv, f, r: v == "UGRD" and lv == "250 mb",
-        "v250": lambda v, lv, f, r: v == "VGRD" and lv == "250 mb",
-    }
+    # Heights, wind, temperature and moisture at the upper-air levels (same maps as the GFS).
+    names = {"z": "HGT", "u": "UGRD", "v": "VGRD", "t": "TMP", "q": "SPFH"}
+    pres = {f"{k}{p}": (lambda var, lvl: lambda v, lv, f, r: v == var and lv == lvl)(var, f"{p} mb")
+            for k, var in names.items() for p in AI_LEVELS[k]}
     ar = area("na")
     g = {}
     for part, want in (("sfc", sfc), ("pres", pres)):
@@ -1359,8 +1513,8 @@ def aigfs_fields(run, h):
 
 
 AIFS_WANT = {("2t", None): "t2", ("2d", None): "d2", ("msl", None): "msl", ("10u", None): "u10", ("10v", None): "v10",
-             ("100u", None): "u100", ("100v", None): "v100", ("gh", "500"): "z500", ("gh", "250"): "z250",
-             ("u", "250"): "u250", ("v", "250"): "v250", ("sf", None): "sf"}
+             ("100u", None): "u100", ("100v", None): "v100", ("sf", None): "sf",
+             **{({"z": "gh"}.get(k, k), str(p)): f"{k}{p}" for k in AI_LEVELS for p in AI_LEVELS[k]}}
 
 
 def aifs_fields(run, h):
@@ -1381,6 +1535,12 @@ def ai_out(g, tp6, qpf):
     }
     if "u100" in g and "v100" in g:
         out["w100"] = np.hypot(g["u100"], g["v100"]) * 2.23694
+    # Ground-to-500 mb shear and the 200-850 mb maps, like the GFS and ECMWF.
+    out.update(surface_wind(g))
+    if all(k in g for k in ("q700", "t700")):
+        g["rh700"] = rh_from_q(g["q700"], g["t700"], 700)
+    ar = area("na")
+    out.update(upper_air(g, lambda: (kinematics(g["u500"], g["v500"], ar)[1] + coriolis(ar)) * 1e5))
     return out
 
 
@@ -1398,6 +1558,9 @@ def draw_ai(f, h):
     }
     if "snow" in f:  # ECMWF's AIFS has snowfall; NOAA's AIGFS doesn't
         out["snow"] = picture(ar, fill(f["snow"], "snow"))
+    if "shr_u" in f:
+        out["shear"] = shear_pic(ar, f["shr_u"], f["shr_v"], "shear5")
+    out.update(draw_upper(ar, f))
     return out
 
 
@@ -1490,19 +1653,50 @@ STORM_MAPS = ["radar", "temp", "dew", "gust", "cape", "uh", "qpf", "mslp"]
 
 # ---- drawing ------------------------------------------------------------------
 
-def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None):
-    """RGBA image with optional contour lines [(field, levels, color, width, labels, dashed)]
-    and wind barbs (u_kt, v_kt, spacing_px, color)."""
+def pressure_centers(msl, n_px=90):
+    """Highs and lows on a smoothed sea-level pressure field, as Pivotal-style labels:
+    a big H (blue) or L (red) with the pressure under it. A center must be the highest
+    or lowest spot within n_px pixels and stand out from its surroundings by 2 mb."""
+    from scipy.ndimage import maximum_filter, minimum_filter, uniform_filter
+    if msl is None or not np.isfinite(msl).any():
+        return []
+    a = np.where(np.isfinite(msl), msl, np.nanmean(msl))
+    size = 2 * n_px + 1
+    around = uniform_filter(a, size=size, mode="nearest")
+    # Not next to the edge of the model's area (blank there), where the filled-in values aren't real.
+    ok = uniform_filter((~np.isfinite(msl)).astype(np.float32), size=size, mode="nearest") < 1e-6
+    out = []
+    edge = 20  # labels right at the picture's edge get cut off
+    for kind, peak, color, test in (("H", maximum_filter(a, size=size, mode="nearest"), "#1d4ed8", lambda v, m: v - m >= 2),
+                                    ("L", minimum_filter(a, size=size, mode="nearest"), "#dc2626", lambda v, m: m - v >= 2)):
+        ys, xs = np.nonzero((a == peak) & ok)
+        taken = []
+        for y, x in zip(ys, xs):
+            if not (edge < x < a.shape[1] - edge and edge < y < a.shape[0] - edge) or not test(a[y, x], around[y, x]):
+                continue
+            if any(abs(x - tx) < n_px and abs(y - ty) < n_px for tx, ty in taken):
+                continue  # a flat center gives several equal pixels: label it once
+            taken.append((x, y))
+            out.append((x + 0.5, y + 0.5, kind, f"{a[y, x]:.0f}", color))
+    return out
+
+
+NO_PICTURE = b""
+
+
+def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None, centers=None):
+    """RGBA image with optional contour lines [(field, levels, color, width, labels, dashed)],
+    wind barbs (u_kt, v_kt, spacing_px, color) and H/L pressure centers [(x, y, letter, value, color)]."""
     width, height = ar.width, ar.height
-    if not contours and barbs is None and fill_rgba is not None and fill_rgba.shape[:2] == (height, width):
+    if not contours and barbs is None and not centers and fill_rgba is not None and fill_rgba.shape[:2] == (height, width):
         # No lines to draw: skip matplotlib (much faster, same picture).
         out = io.BytesIO()
         Image.fromarray(fill_rgba, "RGBA").save(out, format="WEBP", quality=80, method=4)
         return out.getvalue()
-    if fill_rgba is None and not contours and barbs is None:
-        out = io.BytesIO()
-        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(out, format="WEBP", quality=80, method=4)
-        return out.getvalue()
+    if fill_rgba is None and not contours and barbs is None and not centers:
+        # No data for this map and hour (not the same as data showing nothing, like
+        # no snow anywhere): no picture, so that hour is left out of this map.
+        return NO_PICTURE
     fig = Figure(figsize=(width / 100, height / 100), dpi=100)
     FigureCanvasAgg(fig)
     ax = fig.add_axes([0, 0, 1, 1])
@@ -1532,6 +1726,11 @@ def picture(ar, fill_rgba, contours=None, sharp=False, barbs=None):
             # Barbs point into the wind: the staff runs toward where the wind comes from.
             ax.barbs(bx[ok], by[ok], bu[ok], bv[ok], length=6.2, linewidth=0.75, color=color,
                      sizes={"emptybarb": 0.12, "spacing": 0.14, "height": 0.38, "width": 0.25})
+    import matplotlib.patheffects as pe
+    halo = [pe.withStroke(linewidth=2.5, foreground="white")]
+    for x, y, letter, value, color in centers or []:
+        ax.text(x, y, letter, color=color, fontsize=17, fontweight="bold", ha="center", va="center", path_effects=halo)
+        ax.text(x, y + 15, value, color=color, fontsize=8, fontweight="bold", ha="center", va="center", path_effects=halo)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", transparent=True, dpi=100)
     buf.seek(0)
@@ -1567,8 +1766,10 @@ def temp_pic(ar, t2):
 
 
 def rain_pic(ar, tp, legend, msl, n=8):
+    if tp is None:  # a run's first hour has no rain yet: left out instead of a map of pressure lines only
+        return picture(ar, None)
     lines = [(smooth(msl, n), MSL_LEVELS, "#334155", 0.9, True, False)] if msl is not None else []
-    return picture(ar, fill(tp, legend), lines)
+    return picture(ar, fill(tp, legend), lines, centers=pressure_centers(smooth(msl, n)) if msl is not None else None)
 
 
 def draw(fields, h):
@@ -1583,6 +1784,12 @@ def draw(fields, h):
     out["qpf"] = picture(ar, fill(fields.get("qpf"), "qpf"))
     if "snow" in fields:
         out["snow"] = picture(ar, fill(fields["snow"], "snow"))
+    if "gust" in fields:
+        out["gust"] = picture(ar, fill(fields["gust"], "gust"))
+    if "w100" in fields:
+        out["wind100"] = picture(ar, fill(fields["w100"], "wind100"))
+    if "ptype" in fields:
+        out["ptype"] = ptype_pic(ar, fields["ptype"])
     out["mslp"] = mslp_pic(ar, fields["msl"], fields.get("u10kt"), fields.get("v10kt"), 6)
     if "shr_u" in fields:
         out["shear"] = shear_pic(ar, fields["shr_u"], fields["shr_v"], "shear5")
@@ -1605,8 +1812,10 @@ def upper_pic(ar, f):
 
 
 def mslp_pic(ar, msl, u, v, n):
-    lines = [(smooth(msl, n), np.arange(940, 1068, 2), "#334155", 0.8, True, False)]
-    return picture(ar, colorize(smooth(msl, n), "mslp"), lines, barbs=(u, v, BARB_GAP, "#1f2937") if u is not None else None)
+    s = smooth(msl, n)
+    lines = [(s, np.arange(940, 1068, 2), "#334155", 0.8, True, False)]
+    return picture(ar, colorize(s, "mslp"), lines, barbs=(u, v, BARB_GAP, "#1f2937") if u is not None else None,
+                   centers=pressure_centers(s))
 
 
 def shear_pic(ar, u, v, legend):
@@ -1684,6 +1893,8 @@ def draw_hrrr(f, h):
         "snow": picture(ar, fill(f["snow"], "snow")),
         "hail": picture(ar, fill(f["hail"], "hail"), sharp=True),
         "ltng": picture(ar, fill(f["ltng"], "ltng")),
+        "smoke": picture(ar, fill(f.get("smoke"), "smoke")),
+        "ptype": ptype_pic(ar, f.get("ptype")),
         **{k: picture(ar, fill(v, k)) for k, v in (f.get("meso") or {}).items()},
         **draw_hrrr_extra(ar, f),
     }
@@ -2026,13 +2237,14 @@ def past_runs(old, run, keep_runs):
     """Older runs still in storage, newest first, for the website's run picker:
     the run being replaced plus the ones it already listed, up to keep_runs in all."""
     out, seen = [], {run}
-    prev = [{"run": old.get("run"), "hours": old.get("hours"), "fields": old.get("fields")}] + list(old.get("past") or [])
+    prev = [{"run": old.get("run"), "hours": old.get("hours"), "fields": old.get("fields"),
+             "fieldHours": old.get("fieldHours")}] + list(old.get("past") or [])
     for p in prev:
         r = p.get("run")
         if not r or r in seen or not p.get("hours"):
             continue
         seen.add(r)
-        out.append({"run": r, "hours": p["hours"], "fields": p.get("fields") or []})
+        out.append({"run": r, "hours": p["hours"], "fields": p.get("fields") or [], "fieldHours": p.get("fieldHours") or {}})
     # Older manifests only listed run names in "keep", without hours: those runs can't be picked.
     return out[: max(0, keep_runs - 1)]
 
@@ -2070,41 +2282,80 @@ UPPER_MAPS = ["h200", "h300", "h500w", "h500", "h700", "h850"]
 HRRR_MESO = ["mlcape", "cin", "shear6", "shear1", "srh1", "lapse", "pwat", "stp", "scp", "mslp", "t3h", "td3h", "cape3h",
              "jet250", "jet300", "h500", "h700", "h850"]
 
+# The storm models (HRRR and RRFS) share one list of maps, and the big global models
+# (GFS, ECMWF and the two AI models) share another, so switching models keeps the
+# same maps wherever the free data has them.
+STORM_FULL = ["radar", "ptype", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng", "smoke"] + HRRR_MESO
+GLOBAL_FULL = FIELDS + ["ptype", "dew", "cape", "qpf", "snow", "gust", "wind100", "mslp", "shear"] + UPPER_MAPS
+
+# One order for every model's map list (the first is the one a model opens on).
+MAP_ORDER = ["temp", "dew", "radar", "ptype", "precip", "rain1", "rain6", "qpf", "snow", "snow6", "ice6", "pop6", "tstm",
+             "wind", "gust", "wind80", "wind100", "sky", "mslp", "t3h", "td3h", "cape", "mlcape", "cin", "cape3h", "shear",
+             "shear6", "shear1", "srh1", "lapse", "pwat", "stp", "scp", "uh", "hail", "ltng", "smoke",
+             "upper", "jet250", "h200", "h300", "jet300", "h500w", "h500", "h700", "h850",
+             "storms40", "rotation", "heavy", "rain24half", "rain24one", "freeze", "pfrzra", "wind25", "wind34", "fog", "spread500"]
+
+
+def ordered(maps):
+    seen = []
+    for m in sorted(maps, key=lambda k: MAP_ORDER.index(k) if k in MAP_ORDER else len(MAP_ORDER)):
+        if m not in seen:
+            seen.append(m)
+    return seen
+
+
 MODELS = {
     "gfs": {"name": "GFS", "latest": gfs_latest, "fields": gfs_fields, "draw": draw, "area": "na",
-            "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "mslp", "shear"] + UPPER_MAPS},
+            "hours": HOURS, "maps": GLOBAL_FULL,
+            "note": "No computer radar, hail or storm-rotation maps: at about 17 miles the GFS is too coarse to draw "
+                    "single storms (the HRRR and RRFS have them). Snowfall is figured at 10 inches of snow per inch of water."},
     "ecmwf": {"name": "European", "latest": ec_latest, "fields": ec_fields, "draw": draw, "area": "na",
-              "hours": HOURS, "maps": FIELDS + ["dew", "cape", "qpf", "snow", "mslp", "shear"] + UPPER_MAPS},
+              "hours": HOURS, "maps": GLOBAL_FULL,
+              "note": "No computer radar, hail or storm-rotation maps: too coarse to draw single storms, and ECMWF's free "
+                      "data doesn't include them."},
     "aigfs": {"name": "AI GFS", "latest": short_latest(lambda r, h: aigfs_url(r, h, "sfc"), AI_HOURS[-1], every=12),
               "fields": aigfs_fields, "draw": draw_ai, "area": "na", "hours": AI_HOURS,
-              "maps": AI_MAPS},
+              "maps": AI_MAPS,
+              "note": "An AI model: it only forecasts temperature, wind, pressure, humidity and rain, so there are no "
+                      "storm fuel (CAPE), gust, snowfall, rain-or-snow or radar maps."},
     "aifs": {"name": "European AI", "latest": lambda now: ec_latest(now, "aifs-single", AI_HOURS[-1]),
-             "fields": aifs_fields, "draw": draw_ai, "area": "na", "hours": AI_HOURS, "maps": AI_MAPS + ["snow"]},
+             "fields": aifs_fields, "draw": draw_ai, "area": "na", "hours": AI_HOURS, "maps": AI_MAPS + ["snow"],
+             "note": "An AI model: it forecasts temperature, wind, pressure, humidity, rain and snow, so there are no "
+                     "storm fuel (CAPE), gust or radar maps."},
     "gefs": {"name": "GEFS chances", "latest": gefs_latest, "fields": gefs_fields, "draw": draw_gefs,
              "area": "na", "hours": GEFS_HOURS, "workers": 1,
-             "maps": ["rain24half", "rain24one", "freeze", "wind25", "spread500"]},
+             "maps": ["rain24half", "rain24one", "freeze", "wind25", "spread500"],
+             "note": "Chances worked out from 31 GFS runs. For one run's temperature, jet stream and so on, pick GFS."},
     "nbm": {"name": "NBM blend", "latest": short_latest(nbm_url, NBM_HOURS[-1], every=12), "fields": nbm_fields,
             "draw": draw_nbm, "area": "conus", "hours": NBM_HOURS,
-            "maps": ["temp", "pop6", "tstm", "rain6", "snow6", "ice6", "gust", "sky", "wind80"]},
+            "maps": ["temp", "pop6", "tstm", "rain6", "snow6", "ice6", "gust", "sky", "wind80"],
+            "note": "A blend of many models at the ground, so it has no jet stream, upper-air or storm-ingredient maps."},
     "hrrr": {"name": "HRRR", "latest": short_latest(hrrr_url, 48), "fields": hrrr_fields, "draw": draw_hrrr,
-             "area": "conus", "hours": list(range(0, 49)), "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "ltng"] + HRRR_MESO,
-             "points": True},
+             "area": "conus", "hours": list(range(0, 49)), "maps": STORM_FULL, "points": True},
     "rrfs": {"name": "RRFS", "latest": short_latest(rrfs_url, RRFS_HOURS[-1], every=12), "fields": rrfs_fields,
-             "draw": draw_rrfs, "area": "conus", "hours": RRFS_HOURS,
-             "maps": ["radar", "temp", "rain1", "gust", "uh", "dew", "cape", "qpf", "snow", "hail", "smoke", "ptype", "mslp"]},
+             "draw": draw_rrfs, "area": "conus", "hours": RRFS_HOURS, "maps": STORM_FULL},
     "refs": {"name": "REFS chances", "latest": short_latest(refs_url, 60, every=12), "fields": refs_fields,
              "draw": draw_refs, "area": "conus", "hours": list(range(1, 61)),
-             "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy", "freeze", "pfrzra", "wind34", "fog"]},
+             "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy", "freeze", "pfrzra", "wind34", "fog"],
+             "note": "Chances from NOAA's storm-model group. Its free files hold blended radar, rain and temperature "
+                     "plus chances, not upper air; for the jet stream and storm ingredients pick RRFS or HRRR."},
     # Being retired by NOAA (see SUNSET): shown until NOAA stops making them.
     "href": {"name": "HREF", "latest": short_latest(href_url, 48, every=12), "fields": href_fields, "draw": draw_href,
-             "area": "conus", "hours": list(range(1, 49)), "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy"]},
+             "area": "conus", "hours": list(range(1, 49)), "maps": ["radar", "temp", "rain1", "storms40", "rotation", "heavy"],
+             "note": "NOAA is retiring the HREF for the REFS, so only its basic chance maps are drawn until it stops."},
     "nam": {"name": "NAM 3 km", "latest": short_latest(nam_url, 60, every=12), "fields": storm_model_fields(nam_url),
             "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 61)),
-            "maps": [m for m in STORM_MAPS if m != "qpf"]},  # NAM rain comes in 3-hour pieces, not run totals
+            "maps": [m for m in STORM_MAPS if m != "qpf"],  # NAM rain comes in 3-hour pieces, not run totals
+            "note": "NOAA is retiring the NAM for the RRFS, so only the basic storm maps are drawn until it stops. "
+                    "For the full set pick RRFS or HRRR."},
     **{f"hrw{k}": {"name": name, "latest": short_latest(hiresw_url(k), 48, every=12), "fields": storm_model_fields(hiresw_url(k)),
-                   "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 49)), "maps": STORM_MAPS}
+                   "draw": draw_storm_model, "area": "conus", "hours": list(range(0, 49)), "maps": STORM_MAPS,
+                   "note": "NOAA is retiring the HiResW models for the RRFS, so only the basic storm maps are drawn "
+                           "until they stop. For the full set pick RRFS or HRRR."}
        for k, name in (("arw", "HRW ARW"), ("arw2", "HRW ARW2"), ("fv3", "HRW FV3"))},
 }
+for _spec in MODELS.values():
+    _spec["maps"] = ordered(_spec["maps"])
 DEFAULT_MODELS = list(MODELS)
 # Taken off the page by hand: dropped from the map list the next time any model uploads.
 RETIRED = set()
@@ -2125,14 +2376,32 @@ def points_bytes(by_hour, hours):
     return out.tobytes()
 
 
-def render_model(model, run, hours, out_dir, upload, points=None):
+def map_list(maps, done, field_hours):
+    """The maps that got pictures (in the model's order) and, for each map whose hours
+    differ from the run's, the hours it has."""
+    hours = sorted(done)
+    fields = [m for m in maps if field_hours.get(m)]
+    fhours = {m: sorted(field_hours[m]) for m in fields if sorted(field_hours[m]) != hours}
+    return fields, fhours
+
+
+def render_model(model, run, hours, out_dir, upload, points=None, field_hours=None):
+    """Draws and uploads every hour. field_hours collects, per map, the hours that have a
+    picture: a map with nothing to show for an hour (rain totals at hour 0, a field a
+    file lacks) gets no picture, so the website and app skip that hour instead of
+    showing a blank map."""
     spec = MODELS[model]
+    lock = threading.Lock()
 
     def one(h):
         f = spec["fields"](run, h)
         if points is not None and f.get("pts") is not None:
             points[h] = f["pts"]
-        pics = spec["draw"](f, h)
+        pics = {k: v for k, v in spec["draw"](f, h).items() if k in spec["maps"] and v}
+        if field_hours is not None:
+            with lock:
+                for k in pics:
+                    field_hours.setdefault(k, []).append(h)
         for field, data in pics.items():
             key = f"{model}/{run}/{field}/{h:03d}.webp"
             if out_dir:
@@ -2199,7 +2468,8 @@ def main():
             t0 = time.time()
             hours = [h for h in spec["hours"] if h in pick] if pick else spec["hours"]
             points = {} if spec.get("points") else None
-            done = render_model(model, run, hours, a.out, a.upload, points)
+            field_hours = {}
+            done = render_model(model, run, hours, a.out, a.upload, points, field_hours)
             print(f"{model}: {len(done)} hours in {time.time() - t0:.0f}s", flush=True)
             point_info = None
             if points:
@@ -2232,7 +2502,12 @@ def main():
             continue
         past = past_runs(old, run, spec.get("keep", KEEP_RUNS))
         ar = AREAS[spec["area"]][0]
-        manifest["models"][model] = {"name": spec["name"], "run": run, "hours": sorted(done), "fields": spec["maps"],
+        fields, fhours = map_list(spec["maps"], done, field_hours)
+        missing = [m for m in spec["maps"] if m not in fields]
+        if missing:
+            print(f"{model}: no pictures for {', '.join(missing)} (left off the list)", flush=True)
+        manifest["models"][model] = {"name": spec["name"], "run": run, "hours": sorted(done), "fields": fields,
+                                     "fieldHours": fhours, "note": spec.get("note", ""),
                                      "bbox": list(ar), "ext": "webp", "past": past, "keep": [p["run"] for p in past]}
         if point_info:
             manifest["models"][model]["points"] = point_info
