@@ -1,0 +1,50 @@
+name: Model-blend rain chance (NBM)
+
+# NOAA's National Blend of Models chance of rain or snow (free on AWS) for the
+# forecast pages and iPhone app on https://atmosdays.eagleeyeinsightsllc.com.
+# Shown next to the NWS chance, because the NWS forecast sometimes trims a
+# low model chance to near zero. Uploads one ~29 MB grid and a small JSON
+# file. Needs the MODELS_UPLOAD_KEY secret (same as the model maps job).
+#
+# NBM runs every hour and its 7-day files land about 1.5 hours later. A run
+# takes under a minute, and this repo is public, so it is free.
+on:
+  schedule:
+    - cron: '40 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Test: print checks, upload nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blend-chance
+  cancel-in-progress: true
+
+jobs:
+  blend:
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Build and upload
+        if: ${{ !inputs.test_only }}
+        env:
+          MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
+          MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
+        run: python blend/nbm_chance.py --upload
+      - name: Test (nothing uploaded)
+        if: ${{ inputs.test_only }}
+        run: python blend/nbm_chance.py --test
