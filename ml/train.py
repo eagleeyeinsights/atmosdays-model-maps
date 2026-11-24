@@ -14,9 +14,10 @@ Output (one JSON file the website evaluates itself, no outside service):
 from __future__ import annotations
 
 import datetime as dt
-import glob
 import json
 import os
+import re
+from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
@@ -36,11 +37,17 @@ SEASONS = {12: "winter", 1: "winter", 2: "winter", 3: "spring", 4: "spring", 5: 
 
 def load(data_dir):
     Xs, Ys, Ms = [], [], []
-    for path in sorted(glob.glob(os.path.join(data_dir, "*.npz"))):
-        z = np.load(path)
-        if list(z["features"]) != FEATURES or not len(z["X"]):
+    for path in sorted(Path(data_dir).glob("*.npz")):
+        if not re.fullmatch(r"(?:rf|gfs)-[0-9]{4}", path.stem):
             continue
-        Xs.append(z["X"]); Ys.append(z["Y"]); Ms.append(z["M"])
+        with np.load(path) as z:
+            if list(z["features"]) != FEATURES:
+                continue
+            X = z["X"]
+            if len(X):
+                Xs.append(X)
+                Ys.append(z["Y"])
+                Ms.append(z["M"])
     if not Xs:
         raise SystemExit("no training chunks yet")
     return np.concatenate(Xs), np.concatenate(Ys), np.concatenate(Ms)
