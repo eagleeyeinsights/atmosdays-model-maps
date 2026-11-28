@@ -1,0 +1,52 @@
+name: Sunset and sunrise sky (HRRR)
+
+# Cloud inputs for the "Sunset quality" score on
+# https://atmosdays.eagleeyeinsightsllc.com/weather/sunset and the iPhone app's
+# Outdoors tab. Reads only the cloud, visibility, humidity and rain fields of
+# NOAA's HRRR model (free on AWS) with byte-range downloads, and uploads one
+# ~3 MB grid plus a small JSON file for each of the next 7 sunsets and 7 sunrises (HRRR for the first 2 days, GFS after). Needs the
+# MODELS_UPLOAD_KEY secret (same as the model maps job).
+#
+# HRRR runs every hour; its last hour lands about 1.5 hours after the run
+# starts. A run takes about a minute (about 3.5 minutes in the hour after a new GFS run, every 6 hours), and this repo is public, so
+# it is free.
+on:
+  schedule:
+    - cron: '25 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Test: print checks, upload nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sunset-sky
+  cancel-in-progress: true
+
+jobs:
+  sky:
+    if: github.repository == 'eagleeyeinsights/atmosdays-model-maps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Build and upload
+        if: ${{ !inputs.test_only }}
+        env:
+          MODELS_UPLOAD_KEY: ${{ secrets.MODELS_UPLOAD_KEY }}
+          MODELS_SITE: https://atmosdays.eagleeyeinsightsllc.com
+        run: python sky/hrrr_sky.py --upload
+      - name: Test (nothing uploaded)
+        if: ${{ inputs.test_only }}
+        run: python sky/hrrr_sky.py --test
