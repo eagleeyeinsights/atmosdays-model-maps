@@ -23,7 +23,11 @@ one home and can be tuned without touching this job.
 Binary layout per event: uint8, [row][col][field], rows south to north, columns
 west to east, 255 = missing. Fields and units are in the event's JSON file.
 Each event goes in a slot (date mod 10), so storage never grows:
-  sky/sunset-<slot>.bin + sky/sunset-<slot>.json, same for sunrise.
+  sky/sunset-<slot>-<version>.bin + sky/sunset-<slot>.json, same for sunrise.
+Every upload writes its grid under a new name first and the JSON (which names that
+grid) last. The site takes the JSON only once the grid it names is fully stored, so
+a run that stops halfway leaves the last complete forecast in place, never a new grid
+under an old run's description. The site removes grids no JSON points to.
 """
 import argparse
 import datetime as dt
@@ -431,6 +435,11 @@ def slot_of(ymd):
     return (dt.date.fromisoformat(ymd).toordinal()) % 10
 
 
+def grid_version(run):
+    """A new name for each upload: the model, its run and the upload time (h2026112718-1764271234)."""
+    return f"{run.model[0].lower()}{run.time:%Y%m%d%H}-{int(time.time())}"
+
+
 def put(path, body, ctype):
     key = os.environ["MODELS_UPLOAD_KEY"]
     site = os.environ.get("MODELS_SITE", "https://atmosdays.eagleeyeinsightsllc.com").rstrip("/")
@@ -493,8 +502,9 @@ def main():
         reader = readers.setdefault((run.model, run.time), Reader(run))
         grid, meta = build_event(reader, kind, ymd, run)
         slot = slot_of(ymd)
-        meta["file"] = f"sky/{kind}-{slot}.bin"
         body = grid.tobytes()
+        meta["file"] = f"sky/{kind}-{slot}-{grid_version(run)}.bin"
+        meta["bytes"] = len(body)
         print(f"{kind} {ymd} from {run.model} {meta['run']}: {meta['cells']} cells, {meta['first']} to {meta['last']}, "
               f"{len(body) / 1e6:.1f} MB, {time.time() - t1:.0f}s")
         for name, lat, lon in CHECKS:
@@ -511,6 +521,7 @@ def main():
             if not os.environ.get("MODELS_UPLOAD_KEY"):
                 print("MODELS_UPLOAD_KEY is not set; nothing uploaded")
                 return
+            # The grid first under its own new name, then the JSON that points to it.
             put(meta["file"], body, "application/octet-stream")
             put(f"sky/{kind}-{slot}.json", json.dumps(meta, separators=(",", ":")).encode(), "application/json")
     total_mb = sum(r.bytes for r in readers.values()) / 1e6
